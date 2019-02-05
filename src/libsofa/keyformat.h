@@ -132,6 +132,11 @@ inline void key_reduce_map(std::string &key, std::uint32_t dbid, std::uint64_t r
 
 inline unsigned int extract_from_key(const std::string_view &, std::size_t );
 
+inline unsigned int extract_from_key(const std::string_view &key, std::size_t skip, const char *&v) {
+	v = key.data()+skip;
+	return 1;
+}
+
 template<typename ... Args>
 inline unsigned int extract_from_key(const std::string_view &key, std::size_t skip, std::uint64_t &v, Args &... vars) {
 	if (key.length()<=skip+8) return 0;
@@ -141,6 +146,8 @@ inline unsigned int extract_from_key(const std::string_view &key, std::size_t sk
 	}
 	return 1+extract_from_key(key,skip+8,vars...);
 }
+
+
 
 template<typename ... Args>
 inline unsigned int extract_from_key(const std::string_view &key, std::size_t skip, std::uint32_t &v, Args &... vars) {
@@ -165,6 +172,20 @@ inline unsigned int extract_from_key(const std::string_view &key, std::size_t sk
 	}
 	return 1+extract_from_key(key,pos,vars...);
 }
+
+template<typename ... Args>
+inline unsigned int extract_from_key(const std::string_view &key, std::size_t skip, std::string_view &v, Args &... vars) {
+	std::size_t pos = skip;
+	std::size_t l = key.length();
+	while (pos < l) {
+		char c = key[pos];
+		if (c == 0) break;
+		++pos;
+	}
+	v = std::string_view(key.data()+skip, pos-skip);
+	return 1+extract_from_key(key,pos,vars...);
+}
+
 inline unsigned int extract_from_key(const std::string_view &, std::size_t ) {
 	return 0;
 }

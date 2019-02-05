@@ -75,7 +75,7 @@ namespace sofadb {
 
 		virtual PIterator find_range(const std::string_view &prefix, bool reverse = false) = 0;
 
-		virtual PIterator find_range(const std::string_view &start, std::string_view &end, bool reverse = false) = 0;
+		virtual PIterator find_range(const std::string_view &start, const std::string_view &end) = 0;
 
 		virtual PIterator find(const std::string_view &prefix) = 0;
 

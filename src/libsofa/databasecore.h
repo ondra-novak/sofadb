@@ -49,6 +49,18 @@ private:
 	typedef std::map<std::string_view, Handle, std::less<> > NameToIDMap;
 	typedef std::vector<std::unique_ptr<Info> > DBList;
 
+	class PInfo {
+	public:
+		Info *ptr;
+		PInfo(Info *ptr):ptr(ptr) {if (ptr) ptr->lock.lock();}
+		PInfo(const PInfo &other):ptr(other.ptr) {if (ptr) ptr->lock.lock();}
+		PInfo(PInfo &&other):ptr(other.ptr) {other.ptr = nullptr;}
+		~PInfo() {if (ptr) ptr->lock.unlock();}
+		Info *operator->() {return ptr;}
+		bool operator==(nullptr_t) const {return ptr == nullptr;}
+		bool operator!=(nullptr_t) const {return ptr != nullptr;}
+	};
+
 
 public:
 
@@ -84,6 +96,7 @@ public:
 	};
 
 	struct DocumentInfo {
+		std::string_view docid;
 		RevID revision;
 		SeqNum seq_number;
 		json::Value content;
@@ -166,7 +179,7 @@ public:
 	 *
 	 * @note revisions are not listed in the order. You need to sort them by seq_number
 	 */
-	void enumAllRevisions(Handle h, const std::string_view &docid, std::function<void(const DocumentInfo &)> callback, bool only_header = false);
+	bool enumAllRevisions(Handle h, const std::string_view &docid, std::function<void(const DocumentInfo &)> callback, bool only_header = false);
 
 
 	///Erases doc
@@ -185,7 +198,23 @@ public:
 	void eraseDoc(Handle h, const std::string_view &docid);
 
 
+	///Erases historical doc
+	/**
+	 * @param h handle to db
+	 * @param docid document id
+	 * @param revision revision id
+	 *
+	 * @note doesn't erase current revision.
+	 */
+	void eraseHistoricalDoc(Handle h, const std::string_view &docid, RevID revision);
 
+
+	void enumDocs(Handle h, const std::string_view &prefix,  bool reversed, std::function<void(const DocumentInfo &)> callback, bool header_only = false);
+	void enumDocs(Handle h, const std::string_view &start_include, const std::string_view &end_exclude, std::function<void(const DocumentInfo &)> callback, bool header_only = false);
+
+	bool findDocBySeqNum(Handle h, SeqNum seqNum, DocID &docid);
+
+	SeqNum readChanges(Handle h, SeqNum from, std::function<bool(const DocID&, const SeqNum &)> &&fn);
 protected:
 
 	PKeyValueDatabase maindb;
@@ -195,7 +224,13 @@ protected:
 
 	Handle allocSlot() ;
 
+	void flushWriteState(WriteState &st);
+	PInfo getDatabaseState(Handle h);
+	PChangeset beginBatch(PInfo &nfo);
+	void endBatch(PInfo &nfo);
+	void value2document(const std::string_view &value, DocumentInfo &doc, bool only_header);
 
+	mutable std::recursive_mutex lock;
 
 
 };
