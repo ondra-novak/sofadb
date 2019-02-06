@@ -308,7 +308,7 @@ bool DatabaseCore::enumAllRevisions(Handle h, const std::string_view& docid,
 	return true;
 }
 
-void DatabaseCore::eraseDoc(Handle h, const std::string_view& docid) {
+void DatabaseCore::eraseDoc(Handle h, const std::string_view& docid, KeySet &modifiedKeys) {
 	PInfo nfo = getDatabaseState(h);
 	if (nfo == nullptr) return ;
 
@@ -323,7 +323,7 @@ void DatabaseCore::eraseDoc(Handle h, const std::string_view& docid) {
 	chng->erase(nfo->key);
 
 	for (auto &&v : nfo->viewState) {
-		view_updateDocument(h, v.first, docid, std::basic_string_view<ViewUpdateRow>());
+		view_updateDocument(h, v.first, docid, std::basic_string_view<ViewUpdateRow>(), modifiedKeys);
 	}
 
 	endBatch(nfo);
@@ -471,8 +471,10 @@ bool DatabaseCore::updateViewState(Handle h, ViewID view, SeqNum seqNum) {
 	return true;
 }
 
-bool DatabaseCore::view_updateDocument(Handle h, ViewID view, const std::string_view& docId,
-		const std::basic_string_view<ViewUpdateRow>& updates) {
+bool DatabaseCore::view_updateDocument(Handle h, ViewID view,
+		const std::string_view& docId,
+		const std::basic_string_view<ViewUpdateRow>& updates,
+		KeySet &modifiedKeys) {
 
 	std::string key;
 	std::string value;
@@ -489,6 +491,7 @@ bool DatabaseCore::view_updateDocument(Handle h, ViewID view, const std::string_
 			vv = kcrs(vv);
 			key_view_map(nfo->key,view,kk,docId);
 			chng->erase(nfo->key);
+			modifiedKeys.insert(std::string(kk));
 		}
 		chng->erase(key);
 		endBatch(nfo);
@@ -497,6 +500,7 @@ bool DatabaseCore::view_updateDocument(Handle h, ViewID view, const std::string_
 		PChangeset chng = beginBatch(nfo);
 		nfo->value2.clear();
 		for (auto &&c: updates) {
+			modifiedKeys.insert(std::string(c.key));
 			key_view_map(nfo->key,view,c.key,docId);
 			chng->put(nfo->key, c.value);
 			nfo->value2.append(c.key);
@@ -506,6 +510,7 @@ bool DatabaseCore::view_updateDocument(Handle h, ViewID view, const std::string_
 		chng->put(nfo->key,nfo->value2);
 		endBatch(nfo);
 	}
+	return true;
 }
 
 void DatabaseCore::endBatch(PInfo &nfo) {
@@ -552,6 +557,7 @@ bool DatabaseCore::view_onUpdateFinish(Handle h, ViewID view, Callback&& cb) {
 	} else {
 		cb();
 	}
+	return true;
 }
 
 
@@ -603,8 +609,9 @@ ViewID DatabaseCore::createView(Handle h, const std::string_view& name) {
 	dbf->viewNameToID[std::string(name)] = w;
 	auto chng = beginBatch(dbf);
 	key_view_state(dbf->key, h, w);
-	serialize_value(dbf->value, 0, name);
+	serialize_value(dbf->value, std::uint64_t(0), name);
 	endBatch(dbf);
+	return w;
 }
 
 ViewID DatabaseCore::findView(Handle h, const std::string_view& name) {

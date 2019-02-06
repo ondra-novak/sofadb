@@ -9,6 +9,7 @@
 #define SRC_LIBSOFA_DATABASECORE_H_
 
 #include <map>
+#include <set>
 #include <vector>
 #include <queue>
 #include <memory>
@@ -25,6 +26,7 @@ public:
 	static const Handle invalid_handle = static_cast<Handle>(-1);
 
 	typedef std::function<void()> Callback;
+	typedef std::set<std::string> KeySet;
 
 private:
 	struct WriteState {
@@ -210,11 +212,13 @@ public:
 	 *
 	 * @param h
 	 * @param docid
+	 * @param reference to set which is filled by keys which has been modified by this operation.
+	 * The modified keys must be used to update reduce maps
 	 *
 	 * @note function can take a time and block the database, because it is need
 	 * to remove document from all views
 	 */
-	void eraseDoc(Handle h, const std::string_view &docid);
+	void eraseDoc(Handle h, const std::string_view &docid, KeySet &modifiedKeys);
 
 
 	///Erases historical doc
@@ -341,13 +345,16 @@ public:
 	 * @param updates key-value records for the document. You need to send all keys
 	 * in a single update. If this array is empty, the function just deletes the
 	 * document from the view
+	 * @param updatedKeys set which is filled by keys that was modified and must be
+	 * 		updated in reduced maps.
 	 * @retval true updated
 	 * @retval false can't update. Probably view or database has been removed
 	 *
 	 * @note the function first delete previous update
 	 */
 	bool view_updateDocument(Handle h, ViewID view, const std::string_view &docId,
-				const std::basic_string_view<ViewUpdateRow> &updates);
+				const std::basic_string_view<ViewUpdateRow> &updates,
+				KeySet &updatedKeys);
 
 	///Creates new view
 	/**
