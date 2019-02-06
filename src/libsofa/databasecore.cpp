@@ -346,18 +346,19 @@ bool DatabaseCore::findDocBySeqNum(Handle h, SeqNum seqNum, DocID &docid) {
 
 }
 
-SeqNum DatabaseCore::readChanges(Handle h, SeqNum from,
+SeqNum DatabaseCore::readChanges(Handle h, SeqNum from, bool reversed,
 		std::function<bool(const DocID&, const SeqNum&)>&& fn)  {
 	std::string key1, key2;
 	key_seq(key1, h, from+1);
 	key_seq(key2, h);
 	std::size_t skip = key2.length();
-	key_seq(key2, h+1, 0);
+	key_seq(key2, h+(reversed?1:0), 0);
 	Iterator iter(maindb->find_range(key1, key2));
+
 	DocID docId;
+	SeqNum seq;
+
 	while (iter.getNext()) {
-		DocID docId;
-		SeqNum seq;
 		extract_value(iter->second,docId);
 		extract_from_key(iter->first, skip, seq);
 		if (!fn(docId, from)) return from;
@@ -365,6 +366,60 @@ SeqNum DatabaseCore::readChanges(Handle h, SeqNum from,
 	return from;
 }
 
+bool DatabaseCore::viewLookup(ViewID viewID, const std::string_view& prefix,
+		bool reversed, std::function<bool(const ViewResult&)>&& callback) {
+
+	std::string key, value;
+	std::size_t skip;
+	key_view_map(key,viewID);
+	skip = key.length();
+	key_view_map(key,viewID, prefix);
+	Iterator iter(maindb->find_range(key,reversed));
+	bool f = false;
+	ViewResult res;
+	while (iter.getNext()) {
+		extract_from_key(iter->first, skip, res.key, res.docid);
+		extract_value(iter->second, res.value);
+		if (!callback(res)) return true;
+		f = true;
+	}
+	return f;
+
+}
+
+bool DatabaseCore::viewLookup(ViewID viewID, const std::string_view& start_key,
+		const std::string_view& end_key, const std::string_view& start_doc,
+		const std::string_view& end_doc,
+		std::function<bool(const ViewResult&)>&& callback) {
+
+	std::string key1, key2, value;
+	std::size_t skip;
+	key_view_map(key1,viewID);
+	skip = key1.length();
+	key_view_map(key1,viewID, start_key, start_doc);
+	key_view_map(key2,viewID, end_key, end_doc);
+	Iterator iter(maindb->find_range(key1,key2));
+	bool f = false;
+	ViewResult res;
+	while (iter.getNext()) {
+		extract_from_key(iter->first, skip, res.key, res.docid);
+		extract_value(iter->second, res.value);
+		if (!callback(res)) return true;
+		f = true;
+	}
+	return f;
+}
+
+SeqNum DatabaseCore::needViewUpdate(Handle h, ViewID view) const {
+}
+
+bool DatabaseCore::updateViewState(Handle h, ViewID view, SeqNum seqNum) {
+}
+
+void DatabaseCore::view_updateDocument(ViewID view,
+		const std::string_view& docId,
+		const std::basic_string_view<ViewUpdateRow>& updates) {
+}
 
 void DatabaseCore::endBatch(PInfo &nfo) {
 	if (nfo->writeState.lockCount > 0) --nfo->writeState.lockCount;
@@ -372,11 +427,11 @@ void DatabaseCore::endBatch(PInfo &nfo) {
 }
 
 
-bool DatabaseCore::onBatchClose(Handle h, CloseBatchCallback cb) {
+bool DatabaseCore::onBatchClose(Handle h, Callback &&cb) {
 	PInfo nfo = getDatabaseState(h);
 	if (nfo == nullptr) return false;
 	if (nfo->writeState.lockCount == 0) cb();
-	else nfo->writeState.waiting.push(cb);
+	else nfo->writeState.waiting.push(std::move(cb));
 	return true;
 }
 void DatabaseCore::value2document(const std::string_view &value, DocumentInfo &doc, bool only_header) {

@@ -13,6 +13,7 @@ namespace sofadb {
 using DocID = std::string;
 using RevID = std::uint64_t;
 using SeqNum = std::uint64_t;
+using ViewID = std::uint64_t;
 using Timestamp = std::uint64_t;
 
 

@@ -27,7 +27,8 @@ enum class IndexType {
 	doc_revs = 5,			///<document-revision map (historical)
 	view_map = 6,			///<view map = key->value
 	view_docs = 7,			///doc->keys
-	reduce_map = 8,			///key->value for reduce
+	view_state = 8,			///db,viewid -> seqnum
+	reduce_map = 9,			///key->value for reduce
 
 };
 
@@ -108,26 +109,32 @@ inline void key_doc_revs(std::string &key, std::uint32_t dbid, const std::string
 inline void key_doc_revs(std::string &key, std::uint32_t dbid, const std::string_view &docid, const std::uint64_t &revid) {
 	build_key(key, IndexType::doc_revs, dbid, docid,revid);
 }
-inline void key_view_map(std::string &key, std::uint32_t dbid, std::uint64_t viewid) {
-	build_key(key, IndexType::view_map, dbid, viewid);
+inline void key_view_map(std::string &key, std::uint64_t viewid) {
+	build_key(key, IndexType::view_map, viewid);
 }
-inline void key_view_map(std::string &key, std::uint32_t dbid, std::uint64_t viewid, const std::string_view &keys) {
-	build_key(key, IndexType::view_map, dbid, viewid, keys);
+inline void key_view_map(std::string &key, std::uint64_t viewid, const std::string_view &keys) {
+	build_key(key, IndexType::view_map, viewid, keys);
 }
-inline void key_view_map(std::string &key, std::uint32_t dbid, std::uint64_t viewid, const std::string_view &keys, const std::uint64_t &docid) {
-	build_key(key, IndexType::view_map, dbid, viewid, keys, docid);
+inline void key_view_map(std::string &key, std::uint64_t viewid, const std::string_view &keys, const std::string_view &docid) {
+	build_key(key, IndexType::view_map,viewid, keys, docid);
 }
-inline void key_view_docs(std::string &key, std::uint32_t dbid, std::uint64_t viewid) {
-	build_key(key, IndexType::view_docs, dbid, viewid);
+inline void key_view_docs(std::string &key, std::uint64_t viewid) {
+	build_key(key, IndexType::view_docs,viewid);
 }
-inline void key_view_docs(std::string &key, std::uint32_t dbid, std::uint64_t viewid, const std::uint64_t &docid) {
-	build_key(key, IndexType::view_docs, dbid, viewid, docid);
+inline void key_view_docs(std::string &key, std::uint64_t viewid, const std::string_view &docid) {
+	build_key(key, IndexType::view_docs, viewid, docid);
+}
+inline void key_view_state(std::string &key, std::uint32_t dbid) {
+	build_key(key, IndexType::view_docs,dbid);
+}
+inline void key_view_state(std::string &key, std::uint32_t dbid, std::uint64_t viewid) {
+	build_key(key, IndexType::view_docs,dbid, viewid);
 }
 inline void key_reduce_map(std::string &key, std::uint32_t dbid, std::uint64_t reduceid) {
-	build_key(key, IndexType::reduce_map, dbid, reduceid);
+	build_key(key, IndexType::reduce_map,dbid, reduceid);
 }
 inline void key_reduce_map(std::string &key, std::uint32_t dbid, std::uint64_t reduceid, const std::uint64_t &keys) {
-	build_key(key, IndexType::reduce_map, dbid, reduceid, keys);
+	build_key(key, IndexType::reduce_map,dbid, reduceid, keys);
 }
 
 inline unsigned int extract_from_key(const std::string_view &, std::size_t );
