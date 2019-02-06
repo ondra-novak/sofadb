@@ -12,7 +12,6 @@
 #include <vector>
 #include <queue>
 #include <memory>
-#include <imtjson/value.h>
 #include "types.h"
 #include "kvapi.h"
 #include <mutex>
@@ -35,8 +34,8 @@ private:
 	};
 
 	struct ViewState {
-		///reference to script (or script self) to build this view
-		std::string scriptRef;
+		///name (identification) of the view
+		std::string name;
 		///sequence number of last update
 		SeqNum seqNum = 0;
 		///functions waiting to finish update
@@ -46,12 +45,14 @@ private:
 	};
 
 	typedef std::map<ViewID, ViewState> ViewStateMap;
+	typedef std::map<std::string, ViewID, std::less<> > ViewNameToID;
 
 	struct Info {
 		std::string name;
 		SeqNum nextSeqNum = 1;
 		WriteState writeState;
 		ViewStateMap viewState;
+		ViewNameToID viewNameToID;
 		///temporary buffer for key
 		std::string key,key2;
 		///temporary buffer for value
@@ -105,15 +106,10 @@ public:
 		DocID docId;
 		///Revision of the document (should be hash of data)
 		RevID revision;
-		///rest of the document is stored as json
-		json::Value content;
-	};
-
-	struct DocumentInfo {
-		std::string_view docid;
-		RevID revision;
+		///Sequence number - field is used when document is read. It is ignored while document is written
 		SeqNum seq_number;
-		json::Value content;
+		///rest of the document is stored as json
+		std::string_view payload;
 	};
 
 	struct ViewUpdateRow {
@@ -176,11 +172,10 @@ public:
 	 * @param h handle to database
 	 * @param docid ID of document
 	 * @param content this structure is filled by content
-	 * @param only_header set true, if you need just only header - will not set JSON part of the document
 	 * @retval true found
 	 * @retval false not found
 	 */
-	bool findDoc(Handle h, const std::string_view &docid, DocumentInfo &content, bool only_header = false);
+	bool findDoc(Handle h, const std::string_view &docid, RawDocument &content);
 
 	///Retrieve historical document from the database
 	/**
@@ -189,11 +184,10 @@ public:
 	 * @param docid document id
 	 * @param revid revision id
 	 * @param content this strutcure is filled by content
-	 * @param only_header set true, if you need just only header - in this case, only seqnum is viable
 	 * @retval true found
 	 * @retval false not found
 	 */
-	bool findDoc(Handle h, const std::string_view &docid, RevID revid, DocumentInfo &content, bool only_header = false);
+	bool findDoc(Handle h, const std::string_view &docid, RevID revid, RawDocument &content);
 
 
 	///Lists all revisions of the document
@@ -201,11 +195,10 @@ public:
 	 * @param h handle to the database
 	 * @param docid document id
 	 * @param callback function called for each revision
-	 * @param only_header set true, if you need just only header
 	 *
 	 * @note revisions are not listed in the order. You need to sort them by seq_number
 	 */
-	bool enumAllRevisions(Handle h, const std::string_view &docid, std::function<void(const DocumentInfo &)> callback, bool only_header = false);
+	bool enumAllRevisions(Handle h, const std::string_view &docid, std::function<void(const RawDocument &)> callback);
 
 
 	///Erases doc
@@ -235,8 +228,8 @@ public:
 	void eraseHistoricalDoc(Handle h, const std::string_view &docid, RevID revision);
 
 
-	void enumDocs(Handle h, const std::string_view &prefix,  bool reversed, std::function<void(const DocumentInfo &)> callback, bool header_only = false);
-	void enumDocs(Handle h, const std::string_view &start_include, const std::string_view &end_exclude, std::function<void(const DocumentInfo &)> callback, bool header_only = false);
+	void enumDocs(Handle h, const std::string_view &prefix,  bool reversed, std::function<void(const RawDocument &)> callback);
+	void enumDocs(Handle h, const std::string_view &start_include, const std::string_view &end_exclude, std::function<void(const RawDocument &)> callback);
 
 	///Finds document by sequence number if exists
 	/**
@@ -297,7 +290,7 @@ public:
 	 *
 	 * @note seqnum always starts on 1, so zero is used as "not need update".
 	 */
-	SeqNum needViewUpdate(Handle h, ViewID view) const;
+	SeqNum needViewUpdate(Handle h, ViewID view) ;
 
 	///Should be called after view update is done
 	/**
@@ -311,6 +304,34 @@ public:
 	 */
 	bool updateViewState(Handle h, ViewID view, SeqNum seqNum);
 
+	///Anounces that specified view is being updated
+	/**
+	 * @param h database handle
+	 * @param view view ID
+	 * @retval true granted
+	 * @retval false already being updated
+	 *
+	 */
+	bool view_beginUpdate(Handle h, ViewID view);
+
+	///Anounces that specified view has been updated
+	/**
+	 * @param h database handle
+	 * @param view view ID
+	 */
+	void view_endUpdate(Handle h, ViewID view);
+
+	///Registers callback, which is called when view finishes its update
+	/**
+	 *
+	 * @param h database handle
+	 * @param view view ID
+	 * @param cb callback function
+	 * @retval true registered
+	 * @retval false database or view doesn't exists
+	 */
+	bool view_onUpdateFinish(Handle h, ViewID view, Callback &&cb);
+
 
 	///Updates document in the view
 	/**
@@ -320,11 +341,43 @@ public:
 	 * @param updates key-value records for the document. You need to send all keys
 	 * in a single update. If this array is empty, the function just deletes the
 	 * document from the view
+	 * @retval true updated
+	 * @retval false can't update. Probably view or database has been removed
 	 *
 	 * @note the function first delete previous update
 	 */
-	void view_updateDocument(ViewID view, const std::string_view &docId,
+	bool view_updateDocument(Handle h, ViewID view, const std::string_view &docId,
 				const std::basic_string_view<ViewUpdateRow> &updates);
+
+	///Creates new view
+	/**
+	 * Creates new empty view. It starts immediately inidicate that need update
+	 * @param h handle to database
+	 * @param name name of the view (user defined name or identification)
+	 * @return ID of the view. The ID is globally unique and used to access
+	 * the data of the view on core object. Function can return 0 if the
+	 * h contains invalid handle
+	 *
+	 * @see findView
+	 */
+	ViewID createView(Handle h, const std::string_view &name);
+	///Finds view by name
+	/**
+	 *
+	 * @param h ID of database
+	 * @param name name of the view
+	 * @return function returns ID of the view, or zero if view doesn't not exists
+	 */
+	ViewID findView(Handle h, const std::string_view &name);
+
+	///Deletes view
+	/**
+	 * @param h handle to database
+	 * @param view id to view
+	 * @retval true send for deletetion
+	 * @retval false view not found
+	 */
+	bool deleteView(Handle h, ViewID view);
 
 protected:
 
@@ -340,16 +393,17 @@ protected:
 	PInfo getDatabaseState(Handle h);
 	PChangeset beginBatch(PInfo &nfo);
 	void endBatch(PInfo &nfo);
-	void value2document(const std::string_view &value, DocumentInfo &doc, bool only_header);
+	void value2document(const std::string_view &value, RawDocument &doc);
 
 	mutable std::recursive_mutex lock;
 
-	void loadViews();
 
-	void deleteView(Handle h, ViewID view);
+	void deleteViewRaw(Handle h, ViewID view);
 
 	ViewID allocView();
 
+	void loadDBs();
+	void loadViews();
 
 
 };

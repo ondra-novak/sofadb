@@ -17,6 +17,7 @@ namespace json {
 
 namespace sofadb {
 
+
 enum class IndexType {
 
 	db_map = 0,   			///<list of DBS, map DB -> ID
@@ -39,10 +40,14 @@ namespace _misc {
 	template<typename ... Args>
 	void serialize_key(std::string &key, bool needSep, std::uint32_t x, Args && ... args);
 
+	void addSep(std::string &key) {
+		key.push_back(0);
+		key.push_back(0);
+	}
 
 	template<typename ... Args>
 	void serialize_key(std::string &key, bool needSep, const std::string_view &x, Args && ... args) {
-		if (needSep) key.push_back(0);
+		if (needSep) addSep(key);
 		key.append(x);
 		serialize_key(key, true, std::forward<Args>(args)...);
 	}
@@ -50,19 +55,32 @@ namespace _misc {
 
 	template<typename ... Args>
 	void serialize_key(std::string &key, bool needSep, std::uint64_t x, Args && ... args) {
-		if (needSep) key.push_back(0);
+		if (needSep) addSep(key);
 		for (int i = 0; i < 8; i++)	key.push_back(static_cast<char>((x >> (8*(8-i-1))) & 0xFF));
 		serialize_key(key, false, std::forward<Args>(args)...);
 	}
 
 	template<typename ... Args>
 	void serialize_key(std::string &key, bool needSep, std::uint32_t x, Args && ... args) {
-		if (needSep) key.push_back(0);
+		if (needSep) addSep(key);
 		for (int i = 0; i < 4; i++)	key.push_back(static_cast<char>((x >> (8*(8-i-1))) & 0xFF));
 		serialize_key(key, false, std::forward<Args>(args)...);
 	}
 
 }
+
+class KCursor {
+public:
+	std::size_t pos = 0;
+	template<typename X>
+	auto operator()(X &&x) const {
+		return x.substr(pos);
+	}
+	std::size_t operator=(std::size_t pos) {
+		this->pos = pos;
+		return pos;
+	}
+};
 
 template<typename ... Args>
 inline void build_key(std::string &key, IndexType t, Args&& ... args) {
@@ -124,6 +142,9 @@ inline void key_view_docs(std::string &key, std::uint64_t viewid) {
 inline void key_view_docs(std::string &key, std::uint64_t viewid, const std::string_view &docid) {
 	build_key(key, IndexType::view_docs, viewid, docid);
 }
+inline void key_view_state(std::string &key) {
+	build_key(key, IndexType::view_docs);
+}
 inline void key_view_state(std::string &key, std::uint32_t dbid) {
 	build_key(key, IndexType::view_docs,dbid);
 }
@@ -139,10 +160,13 @@ inline void key_reduce_map(std::string &key, std::uint32_t dbid, std::uint64_t r
 
 inline unsigned int extract_from_key(const std::string_view &, std::size_t );
 
-inline unsigned int extract_from_key(const std::string_view &key, std::size_t skip, const char *&v) {
-	v = key.data()+skip;
+inline unsigned int extract_from_key(const std::string_view &, std::size_t skip, KCursor &cursor) {
+	cursor = skip;
 	return 1;
 }
+
+template<typename ... Args> inline unsigned int extract_from_key(const std::string_view &key, std::size_t skip, std::uint32_t &v, Args &... vars);
+template<typename ... Args> inline unsigned int extract_from_key(const std::string_view &key, std::size_t skip, std::string_view &v, Args &... vars);
 
 template<typename ... Args>
 inline unsigned int extract_from_key(const std::string_view &key, std::size_t skip, std::uint64_t &v, Args &... vars) {
@@ -173,7 +197,9 @@ inline unsigned int extract_from_key(const std::string_view &key, std::size_t sk
 	v.clear();
 	while (pos < l) {
 		char c = key[pos];
-		if (c == 0) break;
+		if (c == 0 && pos+1<l && key[pos+1] == 0) {
+			pos+=2;break;
+		}
 		v.push_back(c);
 		++pos;
 	}
@@ -186,7 +212,9 @@ inline unsigned int extract_from_key(const std::string_view &key, std::size_t sk
 	std::size_t l = key.length();
 	while (pos < l) {
 		char c = key[pos];
-		if (c == 0) break;
+		if (c == 0 && pos+1<l && key[pos+1] == 0) {
+			pos+=2;break;
+		}
 		++pos;
 	}
 	v = std::string_view(key.data()+skip, pos-skip);

@@ -61,6 +61,13 @@ namespace sofadb {
 
 		virtual void rollback() = 0;
 
+		///Erases all records with key starting by a prefix
+			/** function can finish asynchronously. The main purpose
+			 * of this function is to perform cleanup of old data
+			 *  */
+		virtual void erasePrefix(const std::string_view &prefix) = 0;
+
+
 		virtual ~AbstractChangeset() {}
 
 	};
