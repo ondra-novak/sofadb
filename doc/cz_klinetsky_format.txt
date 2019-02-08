@@ -1,0 +1,46 @@
+Běžný klient
+
+{
+"id": "<id dokumentu>",
+"rev":"<revize dokumentu - hexnum">,
+"data":{.... uživatelský obsah...},
+"seqnum" : sekvenční číslo v db
+"conflicts":{
+	"rev":{...diff vůči této revizi...},
+	"rev":{...diff vůči této revizi...},
+	},
+"deleted":true|undefined
+}
+
+Replikátor
+
+{
+"id": "<id dokumentu>",
+"revs":[... "<seznam revizí dokumentu - hexnum"...],
+"data":{.... uživatelský obsah...},
+"seqnum" : sekvenční číslo v db
+"conflicts":{
+	"rev":{...diff vůči této revizi...},
+	"rev":{...diff vůči této revizi...},
+	}
+"deleted":true|undefined
+}
+
+Zápis diffu:
+
+Diff se zapisuje po objektech tak, aby se dal rekurzivně aplikovat
+na aktuální revizi. V každém objektu může být speciální klíč "!",
+který obsahuje seznam odstraněných polí. Klíč "!" je escapován
+jako "!!", klíč "!!" jako "!!!" atd...
+
+{
+"!":["aaa","bbb"],
+"foo":123,
+"baz":true
+}
+
+znamená - z objektu odstraň "aaa" a "bbb" a zapiš "foo" a "baz", zbytek
+ponechej
+
+Výpočet revize
+

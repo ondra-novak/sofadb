@@ -3,4 +3,3 @@ add_compile_options(-std=c++17 -fPIC)
 file(GLOB sofa_SRC "*.cpp")
 file(GLOB sofa_HDR "*.h" "*.tcc")
 add_library (sofa ${sofa_SRC})
-

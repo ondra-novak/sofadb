@@ -255,9 +255,30 @@ inline void enum_database_prefixes(std::string &key, std::uint32_t dbid, Fn &&fn
 }
 
 
-std::string serializeJSON(const json::Value &v);
-json::Value parseJSON(const std::string_view &str);
-void serializeJSON(const json::Value& v, std::string &out);
+class JsonSource {
+public:
+	JsonSource(std::string_view &source):source(source) {}
+	int operator()() {
+		if (source.empty()) return 2;//Binjson defines 2 as undefined
+		else {
+			char c = source[0];
+			source = source.substr(1);
+			return c;
+		}
+	}
+protected:
+	std::string_view &source;
+};
+
+class JsonTarget {
+public:
+	JsonTarget(std::string &target):target(target) {}
+	void operator()(char c) {
+		target.push_back(c);
+	}
+protected:
+	std::string target;
+};
 
 }
 

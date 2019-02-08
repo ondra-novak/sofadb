@@ -79,13 +79,11 @@ private:
 	};
 
 
+
+
 public:
 
-	DatabaseCore();
-	virtual ~DatabaseCore();
-
-	void open(std::string_view name);
-
+	DatabaseCore(PKeyValueDatabase db);
 
 
 	Handle create(const std::string_view &name);
@@ -153,6 +151,15 @@ public:
 	bool storeUpdate(Handle h, const RawDocument &doc);
 
 
+	///Stores document to history, it doesn't change top
+	/**
+	 * @param h handle to database
+	 * @param doc document to store
+	 * @retval true stored
+	 * @retval false already exists
+	 */
+	bool storeToHistory(Handle h, const RawDocument &doc);
+
 	///Called after batch is successfuly closed
 	/** Allows to open batch exlusivelly
 	 *
@@ -174,10 +181,11 @@ public:
 	 * @param h handle to database
 	 * @param docid ID of document
 	 * @param content this structure is filled by content
+	 * @param storage used to hold actual content of the document because RawDocument doesn't have space for the data
 	 * @retval true found
 	 * @retval false not found
 	 */
-	bool findDoc(Handle h, const std::string_view &docid, RawDocument &content);
+	bool findDoc(Handle h, const std::string_view &docid, RawDocument &content, std::string &storage);
 
 	///Retrieve historical document from the database
 	/**
@@ -186,10 +194,11 @@ public:
 	 * @param docid document id
 	 * @param revid revision id
 	 * @param content this strutcure is filled by content
+	 * @param storage used to hold actual content of the document because RawDocument doesn't have space for the data
 	 * @retval true found
 	 * @retval false not found
 	 */
-	bool findDoc(Handle h, const std::string_view &docid, RevID revid, RawDocument &content);
+	bool findDoc(Handle h, const std::string_view &docid, RevID revid, RawDocument &content, std::string &storage);
 
 
 	///Lists all revisions of the document

@@ -80,17 +80,16 @@ namespace sofadb {
 
 		virtual PChangeset createChangeset();
 
-		virtual PIterator find_range(const std::string_view &prefix, bool reverse = false) = 0;
+		virtual PIterator findRange(const std::string_view &prefix, bool reverse = false) = 0;
 
-		virtual PIterator find_range(const std::string_view &start, const std::string_view &end) = 0;
+		virtual PIterator findRange(const std::string_view &start, const std::string_view &end) = 0;
 
-		virtual PIterator find(const std::string_view &prefix) = 0;
 
 		virtual bool lookup(const std::string_view &key, std::string &value)  = 0;
 
-		virtual std::size_t getIndexSize(const std::string_view &prefix) const = 0;
+		virtual bool exists(const std::string_view &key) = 0;
 
-		virtual std::size_t getIndexSize(const std::string_view &start, std::string_view &end) const = 0;
+		virtual bool existsPrefix(const std::string_view &key) = 0;
 
 		virtual ~AbstractKeyValueDatabase() {};
 
@@ -106,6 +105,8 @@ namespace sofadb {
 
 		virtual ~AbstractKeyValueFactory() {};
 	};
+
+	using PKeyValueFactory = RefCntPtr<AbstractKeyValueFactory>;
 
 
 

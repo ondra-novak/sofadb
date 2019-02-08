@@ -13,33 +13,22 @@
 
 namespace sofadb {
 
-DatabaseCore::DatabaseCore() {
-	// TODO Auto-generated constructor stub
-
-}
-
-DatabaseCore::~DatabaseCore() {
-	// TODO Auto-generated destructor stub
-}
-
-void DatabaseCore::open(std::string_view name) {
-	std::lock_guard<std::recursive_mutex> _(lock);
-
-	maindb = open_leveldb_database(name);
+DatabaseCore::DatabaseCore(PKeyValueDatabase db):maindb(db) {
 
 	idmap.clear();
 	dblist.clear();
 
 	loadDBs();
 	loadViews();
-
 }
+
+
 void DatabaseCore::loadDBs() {
 	std::string key;
 
 	key_db_map(key);
 	Handle maxHandle = 31;
-	Iterator iter (maindb->find_range(key));
+	Iterator iter (maindb->findRange(key));
 	std::vector<std::pair<std::string, Handle> > tmpstorage;
 
 	while (iter.getNext()) {
@@ -57,7 +46,7 @@ void DatabaseCore::loadDBs() {
 		idmap[nfo->name] = c.second;
 
 		key_seq(key, c.second);
-		Iterator maxseq (maindb->find_range(key, true));
+		Iterator maxseq (maindb->findRange(key, true));
 
 		if (maxseq.getNext()) {
 			SeqNum sq;
@@ -77,7 +66,7 @@ void DatabaseCore::loadViews() {
 	nextViewID = 1;
 	std::string key;
 	key_view_state(key);
-	Iterator iter(maindb->find_range(key));
+	Iterator iter(maindb->findRange(key));
 	while (iter.getNext()) {
 		Handle h;
 		ViewID v;
@@ -264,31 +253,48 @@ bool DatabaseCore::storeUpdate(Handle h, const RawDocument& doc) {
 	return true;
 }
 
+bool DatabaseCore::storeToHistory(Handle h, const RawDocument &doc) {
+	PInfo nfo = getDatabaseState(h);
+	if (nfo == nullptr) return false;
+
+	PChangeset chng = beginBatch(nfo);
+
+	key_doc_revs(nfo->key, h,doc.docId, doc.revision);
+	serialize_value(nfo->value,doc.revision, doc.seq_number,doc.payload);
+	chng->put(nfo->key, nfo->value);
+
+	endBatch(nfo);
+	return true;
+
+}
+
 void DatabaseCore::endBatch(Handle h) {
 	PInfo nfo = getDatabaseState(h);
 	if (nfo == nullptr) return ;
 	endBatch(nfo);
 }
 
-bool DatabaseCore::findDoc(Handle h, const std::string_view& docid, RawDocument& content) {
-	std::string key, value;
+bool DatabaseCore::findDoc(Handle h, const std::string_view& docid, RawDocument& content, std::string &storage) {
+	std::string key;
 	key_docs(key, h, docid);
-	if (!maindb->lookup(key,value)) return false;
-	value2document(value, content);
+	if (!maindb->lookup(key,storage)) return false;
+	value2document(storage, content);
+	content.docId = docid;
 	return true;
 }
 
 bool DatabaseCore::findDoc(Handle h, const std::string_view& docid, RevID revid,
-		RawDocument& content) {
-	std::string key, value;
+		RawDocument& content, std::string &storage) {
+	std::string key;
 	key_docs(key, h, docid);
-	if (!maindb->lookup(key,value)) return false;
-	value2document(value, content);
+	if (!maindb->lookup(key,storage)) return false;
+	value2document(storage, content);
+	content.docId = docid;
 	if (content.revision != revid) {
 		key_doc_revs(key,h,docid,revid);
-		if (!maindb->lookup(key,value)) return false;
+		if (!maindb->lookup(key,storage)) return false;
 	}
-	value2document(value, content);
+	value2document(storage, content);
 	return true;
 }
 
@@ -297,10 +303,11 @@ bool DatabaseCore::enumAllRevisions(Handle h, const std::string_view& docid,
 
 	std::string key;
 	RawDocument docinfo;
-	if (!findDoc(h, docid, docinfo)) return false;
+	docinfo.docId = docid;
+	if (!findDoc(h, docid, docinfo, key)) return false;
 	callback(docinfo);
 	key_doc_revs(key, h, docid);
-	Iterator iter(maindb->find_range(key));
+	Iterator iter(maindb->findRange(key));
 	while (iter.getNext()) {
 		value2document(iter->second, docinfo);
 		callback(docinfo);
@@ -346,7 +353,7 @@ void DatabaseCore::enumDocs(Handle h, const std::string_view& prefix,
 	RawDocument dinfo;
 	std::string key;
 	key_docs(key,h,prefix);
-	Iterator iter(maindb->find_range(key, reversed));
+	Iterator iter(maindb->findRange(key, reversed));
 	auto skip = key.length() - prefix.length();
 	while (iter.getNext()) {
 		value2document(iter->second, dinfo);
@@ -364,7 +371,7 @@ void DatabaseCore::enumDocs(Handle h, const std::string_view& start_include,
 	std::string key1, key2;
 	key_docs(key1,h,start_include);
 	key_docs(key2,h,end_exclude);
-	Iterator iter(maindb->find_range(key1, key2));
+	Iterator iter(maindb->findRange(key1, key2));
 	auto skip = key1.length() - start_include.length();
 	while (iter.getNext()) {
 		value2document(iter->second, dinfo);
@@ -391,7 +398,7 @@ SeqNum DatabaseCore::readChanges(Handle h, SeqNum from, bool reversed,
 	key_seq(key2, h);
 	std::size_t skip = key2.length();
 	key_seq(key2, h+adj, 0);
-	Iterator iter(maindb->find_range(key1, key2));
+	Iterator iter(maindb->findRange(key1, key2));
 
 	DocID docId;
 	SeqNum seq;
@@ -412,7 +419,7 @@ bool DatabaseCore::viewLookup(ViewID viewID, const std::string_view& prefix,
 	key_view_map(key,viewID);
 	skip = key.length();
 	key_view_map(key,viewID, prefix);
-	Iterator iter(maindb->find_range(key,reversed));
+	Iterator iter(maindb->findRange(key,reversed));
 	bool f = false;
 	ViewResult res;
 	while (iter.getNext()) {
@@ -436,7 +443,7 @@ bool DatabaseCore::viewLookup(ViewID viewID, const std::string_view& start_key,
 	skip = key1.length();
 	key_view_map(key1,viewID, start_key, start_doc);
 	key_view_map(key2,viewID, end_key, end_doc);
-	Iterator iter(maindb->find_range(key1,key2));
+	Iterator iter(maindb->findRange(key1,key2));
 	bool f = false;
 	ViewResult res;
 	while (iter.getNext()) {

@@ -9,11 +9,29 @@
 #define SRC_LIBSOFA_KVAPI_LEVELDB_H_
 
 #include "kvapi.h"
+#include <leveldb/db.h>
 
 namespace sofadb {
 
+class LevelDBException: public std::exception {
+public:
 
-PKeyValueDatabase open_leveldb_database(const std::string_view &name);
+	LevelDBException(const leveldb::Status &st);
+
+	const leveldb::Status &getStatus() const {return status;}
+
+protected:
+	leveldb::Status status;
+	mutable std::string msg;
+
+	const char *what() const noexcept;
+
+};
+
+
+PKeyValueDatabase leveldb_open(const leveldb::Options& options, const std::string& name);
+
+
 
 }
 

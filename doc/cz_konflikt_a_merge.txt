@@ -1,0 +1,106 @@
+Konflikt a merge
+----------------
+
+- SofaDB disponuje mechanismem automatickeho merge konfliktů
+- Merge je k dispozici implicitni 3 cestný merge po klíčích, 
+	- nebo merge scriptovaný
+	- případně lze merge vypnout
+	
+Řešení konfliktů při zápisu do databáze
+---------------------------------------
+
+- Klient uvede jako referenční revizi aktuální top revizi
+    -> standardní zápis 
+    	- aktuální revize do historie,
+    	- nová revize se stává top revizí
+    	- klient informován stavem "ok" a číslem nové revize
+    	
+- Klient uvede jako referenční revizi jinou historickou revizi (ne top)
+	-> konflikt vyžaduje merge
+		- databáze vyhledá referencovanou revizi v historii
+			-> pokud neexistuje, chyba - "conflict:
+		- databáze provede 3 cestný merge s top revizí
+		- nová revize se uloží jako top revize
+		- klient informován stavem "merged" bez čísla revize
+			-klient by si měl stáhnout aktuální podobu top revize
+			-případně může být top revize začleněna do odpovědi
+			
+			
+- Replikátor uvede seznam historických revizí s tím, že aktuální top
+			revize je v seznamu
+	-> standardní zápis
+		- nová revize je top
+		- původní top je hisorická
+	- poznámka, replikátor by měl replikovat celou historii, nestačí
+	   posílat poslední revizi. Toto může být předmětem nastavení
+	   
+	 
+	 
+- Replikátor uvede seznam historických revizí s tím že aktuální top
+			revize v seznamu není. Nicméně aktuální top revize
+			má v seznamu aspoň jednu stejnou revizi jako nová revize
+	-> konflikt vyžaduje merge
+		- databáze vyhledá referencovanou revizi v historii
+			-> pokud neexistuje, chyba - "conflict:
+		- databáze provede 3 cestný merge s top revizí
+		- nová revize se uloží jako top revize
+		- replikátor informován stavem "merged"
+		- volitelně lze na cílové databázi zapsat nesloučenou reizi
+		    do historie
+		    
+- Replikátor při replikaci narazí na chybu "conflict"
+	- replikátor si musí ze cílového serveru stáhnout top revizi
+	- replikátor na své straně provede merge
+	- pokud je merge úspěšné, vytvoří novou revizi a tu pošle 
+	    na cílový stroj (konec)
+	- pokud není merge úspěšné, vytvoří v dokumentu metadata "conflicts"
+	    do kterého umístí diff mezi aktuální top revizí a novou revizí
+		(top na cílovém stroji)
+ 	- v závislosti na porovnání timestampů pošle na cílový server 
+ 		- buď svou verzi s difem vůči původní top verzi
+ 		- nebo aktuální top verzi s diffem vůči své verze
+ 	- protože v nové revizi se odkazuje na aktuální top revizi
+ 		nemělo by dojít ke konfliktu
+ 		 . pokud dojde, celý postup se opakuje	
+
+ 		 
+ 		 
+ Ukálání konfliktů
+ ------------------
+ 
+ Narozdíl od CouchDB se konflikty neukládají do alternativních větví
+ pod stejným ID, ale přímo do TOP dokumentu.
+ 
+ {
+ "data": {... aktuální úživatelský obsah.....},
+ "revs": [ ... historie revizí, nejnovější je první ...],
+ "conflicts": [
+    [revid, {...diff...}],
+ 	[revid, {...diff...}],
+ ]
+ }
+ 
+ Pokud dochází ke vzniku revizí na straně serveru, nebo automatickými
+ nástroji, pole conflicts se přenáší do nové revize. Pokud však
+ nová revize vzniká na klientovi, pak se nepřenáší, očekává se,
+ že klient se o konfliktech dozvěděl a zapracoval je.
+ 
+ Při merge dvou dokumentů se mergují i konflikty a to pouze sloučením
+ seznamu z jedné a z druhé větve.
+ 
+ Konflikt při mazání dokumentu
+ -----------------------------
+ 
+ smazaný dokument má přednost!
+ 
+ Smazání dokumentu se provádí zápisem "deleted" do metadat. Pokud
+ se provádí merge se smazaným dokumentem, zápis se neprovede
+ a klient i replikátor obdrží chybu "deleted". Replikátor nejspíš
+ chybi řešit nebude a přikročí k replikaci dalšího dokumentu
+ 
+ Pokud nový dokument s příznakem deleted je zapisován a dojde 
+ ke konfliktu, je zapsán smazaný dokument bez merge a bez ohledu
+ na timestamp
+ 
+ Při konfliktu dvou smazaných dokumentů se sloučení provádí stejně
+ jako by smazané nebyly
