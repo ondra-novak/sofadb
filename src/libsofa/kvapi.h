@@ -78,7 +78,7 @@ namespace sofadb {
 	class AbstractKeyValueDatabase:public RefCntObj{
 	public:
 
-		virtual PChangeset createChangeset();
+		virtual PChangeset createChangeset() = 0;
 
 		virtual PIterator findRange(const std::string_view &prefix, bool reverse = false) = 0;
 

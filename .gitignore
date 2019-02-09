@@ -2,6 +2,10 @@ CMakeCache.txt
 CMakeFiles
 cmake_install.cmake
 Makefile
+/data
+/log
+/bin
+
 # Prerequisites
 *.d
 

@@ -52,6 +52,8 @@ private:
 	struct Info {
 		std::string name;
 		SeqNum nextSeqNum = 1;
+		std::size_t logsize=100;
+		std::size_t age=30*24*60*60*1000L;
 		WriteState writeState;
 		ViewStateMap viewState;
 		ViewNameToID viewNameToID;
@@ -65,6 +67,7 @@ private:
 
 	typedef std::map<std::string_view, Handle, std::less<> > NameToIDMap;
 	typedef std::vector<std::unique_ptr<Info> > DBList;
+
 
 	class PInfo {
 	public:
@@ -108,6 +111,13 @@ public:
 		RevID revision;
 		///Sequence number - field is used when document is read. It is ignored while document is written
 		SeqNum seq_number;
+		///Timestamp of last update
+		/**The timestamp should change everytime the new revision is created */
+		std::uint64_t timestamp;
+		///Version number - note that only 7 bits are used
+		unsigned char version;
+		///true if document is marked as deleted
+		bool deleted;
 		///rest of the document is stored as json
 		std::string_view payload;
 	};
@@ -241,8 +251,8 @@ public:
 	void eraseHistoricalDoc(Handle h, const std::string_view &docid, RevID revision);
 
 
-	void enumDocs(Handle h, const std::string_view &prefix,  bool reversed, std::function<void(const RawDocument &)> callback);
-	void enumDocs(Handle h, const std::string_view &start_include, const std::string_view &end_exclude, std::function<void(const RawDocument &)> callback);
+	bool enumDocs(Handle h, const std::string_view &prefix,  bool reversed, std::function<bool(const RawDocument &)> callback);
+	bool enumDocs(Handle h, const std::string_view &start_include, const std::string_view &end_exclude, std::function<bool(const RawDocument &)> callback);
 
 	///Finds document by sequence number if exists
 	/**
@@ -395,6 +405,12 @@ public:
 	 */
 	bool deleteView(Handle h, ViewID view);
 
+
+	std::size_t getMaxLogSize(Handle h);
+	void setMaxLogSize(Handle h, std::size_t sz);
+	std::size_t getMaxAge(Handle h);
+	void setMaxAge(Handle h, std::size_t sz);
+
 protected:
 
 	PKeyValueDatabase maindb;
@@ -410,6 +426,7 @@ protected:
 	PChangeset beginBatch(PInfo &nfo);
 	void endBatch(PInfo &nfo);
 	void value2document(const std::string_view &value, RawDocument &doc);
+	void document2value(std::string& value, const RawDocument& doc, SeqNum seqid);
 
 	mutable std::recursive_mutex lock;
 
@@ -420,6 +437,9 @@ protected:
 
 	void loadDBs();
 	void loadViews();
+
+	template<typename T>
+	void storeProp(PInfo nfo, Handle h, std::string_view name, const T &prop);
 
 
 };

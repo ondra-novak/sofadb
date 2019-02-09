@@ -20,8 +20,7 @@ namespace sofadb {
 
 enum class IndexType {
 
-	db_map = 0,   			///<list of DBS, map DB -> ID
- 	script_map = 1,         ///<list of all scripts, map script -> hash
+	db_map = 1,   			///<list of DBS, map DB -> ID
 	dbconfig = 2,			///<various keys related to DBS
 	seq = 3,				///<sequence numbers
 	docs = 4,				///<documents
@@ -34,19 +33,21 @@ enum class IndexType {
 };
 
 namespace _misc {
-	void serialize_key(std::string &, bool ) {}
+	inline void serialize_key(std::string &, bool ) {}
 	template<typename ... Args>
-	void serialize_key(std::string &key, bool needSep, std::uint64_t x, Args && ... args);
+	inline void serialize_key(std::string &key, bool needSep, std::uint64_t x, Args && ... args);
 	template<typename ... Args>
-	void serialize_key(std::string &key, bool needSep, std::uint32_t x, Args && ... args);
+	inline void serialize_key(std::string &key, bool needSep, std::uint32_t x, Args && ... args);
+	template<typename ... Args>
+	inline void serialize_key(std::string &key, bool needSep, unsigned char x, Args && ... args);
 
-	void addSep(std::string &key) {
+	inline void addSep(std::string &key) {
 		key.push_back(0);
 		key.push_back(0);
 	}
 
 	template<typename ... Args>
-	void serialize_key(std::string &key, bool needSep, const std::string_view &x, Args && ... args) {
+	inline void serialize_key(std::string &key, bool needSep, const std::string_view &x, Args && ... args) {
 		if (needSep) addSep(key);
 		key.append(x);
 		serialize_key(key, true, std::forward<Args>(args)...);
@@ -54,14 +55,21 @@ namespace _misc {
 
 
 	template<typename ... Args>
-	void serialize_key(std::string &key, bool needSep, std::uint64_t x, Args && ... args) {
+	inline void serialize_key(std::string &key, bool needSep, std::uint64_t x, Args && ... args) {
 		if (needSep) addSep(key);
 		for (int i = 0; i < 8; i++)	key.push_back(static_cast<char>((x >> (8*(8-i-1))) & 0xFF));
 		serialize_key(key, false, std::forward<Args>(args)...);
 	}
 
 	template<typename ... Args>
-	void serialize_key(std::string &key, bool needSep, std::uint32_t x, Args && ... args) {
+	inline void serialize_key(std::string &key, bool needSep, unsigned char x, Args && ... args) {
+		if (needSep) addSep(key);
+		key.push_back(static_cast<char>(x));
+		serialize_key(key, false, std::forward<Args>(args)...);
+	}
+
+	template<typename ... Args>
+	inline void serialize_key(std::string &key, bool needSep, std::uint32_t x, Args && ... args) {
 		if (needSep) addSep(key);
 		for (int i = 0; i < 4; i++)	key.push_back(static_cast<char>((x >> (8*(8-i-1))) & 0xFF));
 		serialize_key(key, false, std::forward<Args>(args)...);
@@ -94,12 +102,6 @@ inline void key_db_map(std::string &key, const std::string_view &dbname) {
 	build_key(key, IndexType::db_map, dbname);
 }
 
-inline void key_script_map(std::string &key, std::uint32_t dbid) {
-	build_key(key, IndexType::script_map, dbid);
-}
-inline void key_script_map(std::string &key, std::uint32_t dbid, const std::string_view &script_path) {
-	build_key(key, IndexType::script_map, dbid, script_path);
-}
 inline void key_dbconfig(std::string &key, std::uint32_t dbid) {
 	build_key(key, IndexType::dbconfig, dbid);
 }
@@ -207,6 +209,20 @@ inline unsigned int extract_from_key(const std::string_view &key, std::size_t sk
 }
 
 template<typename ... Args>
+inline unsigned int extract_from_key(const std::string_view &key, std::size_t skip, unsigned char &v, Args &... vars) {
+	if (key.length()<=skip+1) return 0;
+	v = static_cast<unsigned char>(key[skip]);
+	return 1+extract_from_key(key,skip+1,vars...);
+}
+
+template<typename ... Args>
+inline unsigned int extract_from_key(const std::string_view &key, std::size_t skip, char &v, Args &... vars) {
+	if (key.length()<=skip+1) return 0;
+	v = key[skip];
+	return 1+extract_from_key(key,skip+1,vars...);
+}
+
+template<typename ... Args>
 inline unsigned int extract_from_key(const std::string_view &key, std::size_t skip, std::string_view &v, Args &... vars) {
 	std::size_t pos = skip;
 	std::size_t l = key.length();
@@ -232,26 +248,6 @@ inline void serialize_value(std::string &value, Args && ... data) {
 template<typename ... Args>
 inline void extract_value(const std::string_view &value, Args & ... data) {
 	extract_from_key(value,0,data...);
-}
-template<typename Fn>
-inline void enum_database_prefixes(std::string &key, std::uint32_t dbid, Fn &&fn) {
-
-	static IndexType itypes[] = {
-			IndexType::dbconfig,
-			IndexType::doc_revs,
-			IndexType::docs,
-			IndexType::reduce_map,
-			IndexType::script_map,
-			IndexType::seq,
-			IndexType::view_docs,
-			IndexType::view_map
-	};
-
-	for (auto &&c: itypes) {
-		build_key(key, c, dbid);
-		fn(key);
-	}
-
 }
 
 

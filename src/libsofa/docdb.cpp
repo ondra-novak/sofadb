@@ -7,6 +7,7 @@
 
 #include <imtjson/array.h>
 #include <imtjson/object.h>
+#include <imtjson/binjson.tcc>
 #include <libsofa/docdb.h>
 #include <imtjson/fnv.h>
 #include <imtjson/string.h>
@@ -28,13 +29,25 @@ RevID DocumentDB::parseStrRev(const std::string_view &strrev) {
 	}
 	return rev;
 }
-void DocumentDB::serializeStrRev(RevID rev, std::string &out, int leftZeroes) {
-	if (rev == 0 && leftZeroes <= 0) return;
-	serializeStrRev(rev/62, out, leftZeroes-1);
+char *DocumentDB::serializeStrRev(RevID rev, char *out, int leftZeroes) {
+	if (rev == 0 && leftZeroes <= 0) return out;
+	out = serializeStrRev(rev/62, out, leftZeroes-1);
 	RevID d = rev % 62;
-	if (d < 10) out.push_back(d+'0');
-	else if (d < 36) out.push_back(d-10+'A');
-	else  out.push_back(d-36+'a');
+	if (d < 10) *out = d+'0';
+	else if (d < 36) *out = d-10+'A';
+	else *out = d-36+'a';
+	return out+1;
+}
+
+
+String DocumentDB::serializeStrRev(RevID rev) {
+
+	constexpr auto digits = 12*sizeof(rev)/8;
+
+	return String(digits, [&](char *c) {
+		char *d = serializeStrRev(rev, c,digits);
+		return d-c;
+	});
 }
 
 
@@ -49,199 +62,276 @@ std::uint64_t DocumentDB::getTimestamp() {
 DocumentDB::DocumentDB(DatabaseCore& core):core(core) {
 }
 
-template<bool overwrite_timestamp>
 DocumentDB::Status DocumentDB::createPayload(const json::Value &doc, json::Value &payload) {
 
 	Value data = doc["data"];
-	Value deleted = doc["deleted"];
 	Value conflicts = doc["conflicts"];
-	Value timestamp;
-	if (overwrite_timestamp) {
-		timestamp = getTimestamp();
-	} else {
-		timestamp = doc["timestamp"];
-		if (timestamp.type() != json::number) return error_timestamp_must_be_number;
-	}
-
 	if (!conflicts.defined()) conflicts = json::array;
 	else if (conflicts.type() !=json::array) return error_conflicts_must_be_array;
 
-	if (deleted.defined() && deleted.type() != json::boolean) return error_deleted_must_be_bool;
-	else deleted = deleted.getBool();
-	payload = {data, timestamp, conflicts,deleted};
+	payload = {data, conflicts};
 	return stored;
 }
 
-void DocumentDB::serializePayload(unsigned char version, const json::Value &newhst, const json::Value &payload, std::string &tmp) {
+json::Value DocumentDB::get(Handle h, const std::string_view& id, OutputFormat oform) {
+	DatabaseCore::RawDocument rdoc;
+	std::string tmp;
+	if (!core.findDoc(h,id,rdoc,tmp)) return json::Value();
+	return parseDocument(rdoc, oform);
+}
+
+json::Value DocumentDB::get(Handle h, const std::string_view& id, const std::string_view& rev, OutputFormat oform) {
+	DatabaseCore::RawDocument rdoc;
+	std::string tmp;
+	if (!core.findDoc(h,id,parseStrRev(rev), rdoc,tmp)) return json::Value();
+	return parseDocument(rdoc, oform);
+}
+
+void DocumentDB::serializePayload(const json::Value &newhst, const json::Value &conflicts, const json::Value &payload,  std::string &tmp) {
 	tmp.clear();
-	tmp.push_back(version);
 	newhst.serializeBinary(JsonTarget(tmp),0);
+	conflicts.serializeBinary(JsonTarget(tmp),0);
 	payload.serializeBinary(JsonTarget(tmp),json::compressKeys);
 }
 
+DocumentDB::Status DocumentDB::json2rawdoc(const json::Value &doc, DatabaseCore::RawDocument  &rawdoc, bool new_edit) {
+	Value jid = doc["id"];
+	if (jid.type() != json::string) return error_id_must_be_string;
+	Value jrev = doc["rev"];
+	if (jrev.type() != json::string) {
+		if (!new_edit || jrev.defined())
+			return error_rev_must_be_string;
+	}
+	std::string_view id = jid.getString();
+	std::uint64_t timestamp;
+	if (!new_edit) {
+		Value jtimestamp = doc["timestamp"];
+		if (jtimestamp.type() != json::number) return error_timestamp_must_be_number;
+		timestamp = jtimestamp.getUInt();
+	} else {
+		timestamp = getTimestamp();
+	}
+	RevID rev = parseStrRev(jrev.getString());
+	Value jdel = doc["deleted"];
+	if (jdel.defined() && jdel.type() != json::boolean)
+		return error_deleted_must_be_bool;
+	rawdoc.deleted = jdel.getBool();
+	rawdoc.docId = id;
+	rawdoc.revision = rev;
+	rawdoc.timestamp = timestamp;
+	rawdoc.version = 0;
+	return stored;
+}
+
+
+DocumentDB::Status DocumentDB::loadDataConflictsLog(const json::Value &doc,
+		Value *data, Value *conflicts, Value *log) {
+	if (data) {
+		*data = doc["data"];
+		if (!data->defined()) return error_data_is_manadatory;
+	}
+	if (conflicts) {
+		*conflicts = doc["conflicts"];
+		if (conflicts->defined()) {
+			if (conflicts->type() != json::array) return error_conflicts_must_be_array;
+			for (Value v: *conflicts)
+				if (v.type() != json::string) return error_conflict_must_be_string;
+		}
+	}
+	if (log) {
+		*log = doc["log"];
+		if (!log->defined()) return error_log_is_mandatory;
+		for (Value v: *log)
+			if (v.type() != json::string) return error_log_item_must_be_string;
+	}
+	return stored;
+}
+
+
 DocumentDB::Status DocumentDB::client_put(Handle h, const json::Value &doc, json::String &outrev) {
 
-	Value id = doc["id"];
-	if (id.type() != json::string) return error_id_must_be_string;
-	Value rev = doc["rev"];
-	if (rev.defined() && rev.type() != json::string) return error_rev_must_be_string;
-
-
-	Value payload;
-	Status st = createPayload<true>(doc, payload);
-	if (st != stored) return st;
-
-	RevID newRev = 0;
-	payload.serializeBinary(FNV1a<sizeof(RevID)>(newRev),0);
-
 	DatabaseCore::RawDocument rawdoc;
+	DatabaseCore::RawDocument prevdoc;
 	std::string tmp;
 	Value newhst;
-	bool exists = core.findDoc(h,id.getString(),rawdoc, tmp);
+	Status st;
+	Value data;
+	Value conflicts;
+
+	st = json2rawdoc(doc, rawdoc, true);
+	if (st != stored) return st;
+
+	st = loadDataConflictsLog(doc, &data, &conflicts,nullptr);
+	if (st != stored) return st;
+
+	RevID newRev;
+	Value({data, conflicts, rawdoc.timestamp, rawdoc.deleted}).serializeBinary(FNV1a<sizeof(RevID)>(newRev),0);
+	bool prevrev_ndefined = doc["rev"].getString().empty();
+
+	bool exists = core.findDoc(h,rawdoc.docId,prevdoc, tmp);
 	if (exists) {
-		if (rev.getString().empty()) return conflict;
-		RevID revid = parseStrRev(rev.getString());
-		if (rawdoc.revision != revid) return conflict;
-		Value hst = Value::parseBinary(JsonSource(rawdoc.payload));
+		if (prevrev_ndefined) return conflict;
+		RevID revid = rawdoc.revision;
+		if (rawdoc.revision != prevdoc.revision) return conflict;
+		Value hst = Value::parseBinary(JsonSource(prevdoc.payload));
 		Array joinhst;
 		joinhst.reserve(hst.size()+1);
 		joinhst.push_back(revid);
 		joinhst.addSet(hst);
-		newhst = joinhst;
+		newhst = Value(joinhst).slice(0,core.getMaxLogSize(h));
 	} else {
-		if (!rev.getString().empty()) return conflict;
+		if (!prevrev_ndefined) return conflict;
 		newhst = json::array;
 	}
-	serializePayload(0,newhst, payload, tmp);
-	rawdoc.docId = id.getString();
-	rawdoc.revision = newRev;
+	serializePayload(newhst, conflicts, data, tmp);
 	rawdoc.payload = tmp;
 	core.storeUpdate(h,rawdoc);
 	tmp.clear();
-	serializeStrRev(newRev, tmp);
-	outrev = String(tmp);
+	outrev = serializeStrRev(newRev);
 	return stored;
 }
 
+
+
 DocumentDB::Status DocumentDB::replicator_put(Handle h, const json::Value &doc) {
-	Value id = doc["id"];
-	if (id.type() != json::string) return error_id_must_be_string;
-	Value rev = doc["rev"];
-	if (rev.type() != json::string) return error_rev_must_be_string;
-	RevID curRev = parseStrRev(rev.getString());
-
+	DatabaseCore::RawDocument rawdoc;
+	DatabaseCore::RawDocument prevdoc;
 	std::string tmp;
-	DatabaseCore::RawDocument rdoc;
-	if (core.findDoc(h, id.getString(), curRev,rdoc, tmp)) return stored;
+	Value newhst;
+	Value data;
+	Value conflicts;
+	Value log;
 
-	Value payload;
-	Status st = createPayload<false>(doc, payload);
+	Status st;
+
+	st = json2rawdoc(doc, rawdoc, false);
 	if (st != stored) return st;
 
+	st = loadDataConflictsLog(doc, &data, &conflicts,&log);
+	if (st != stored) return st;
 
-	Value newhst;
-	bool exists = core.findDoc(h,id.getString(),rdoc, tmp);
+	if (core.findDoc(h, rawdoc.docId, rawdoc.revision, prevdoc, tmp)) return stored;
+
+	bool exists = core.findDoc(h,rawdoc.docId, prevdoc, tmp);
 	if (exists) {
-		Array h;
+		Array hl;
 		bool found = false;
-		for (Value v:doc["log"]) {
+		for (Value v:log) {
 			RevID pr = parseStrRev(v.getString());
-			if (pr == rdoc.revision) {
+			if (pr == prevdoc.revision) {
 				found = true;
 				break;
 			}
-			h.push_back(v);
+			hl.push_back(v);
 		}
 		if (!found) {
-			for (Value v:doc["conflicts"]) {
+			for (Value v:conflicts) {
 				RevID pr = parseStrRev(v.getString());
-				if (pr == rdoc.revision) {
+				if (pr == prevdoc.revision) {
 					found = true;
 					break;
 				}
 			}
 			if (!found) return conflict;
 		} else {
-			Value hst = Value::parseBinary(JsonSource(rdoc.payload));
-			h.addSet(hst);
+			Value hst = Value::parseBinary(JsonSource(prevdoc.payload));
+			hl.addSet(hst);
 		}
-		newhst = h;
+		newhst = Value(hl).slice(0,core.getMaxLogSize(h));
 	}
-	serializePayload(0,newhst, payload, tmp);
-	rdoc.revision = curRev;
-	rdoc.payload = tmp;
-	core.storeUpdate(h, rdoc);
+	serializePayload(newhst, conflicts, data, tmp);
+	rawdoc.payload = tmp;
+	core.storeUpdate(h,rawdoc);
+	tmp.clear();
 	return stored;
 }
 
 DocumentDB::Status DocumentDB::replicator_put_history(Handle h, const json::Value &doc) {
-	Value id = doc["id"];
-	if (id.type() != json::string) return error_id_must_be_string;
-	Value rev = doc["rev"];
-	if (rev.type() != json::string) return error_rev_must_be_string;
-	RevID curRev = parseStrRev(rev.getString());
+	DatabaseCore::RawDocument rawdoc;
+	DatabaseCore::RawDocument prevdoc;
+	std::string tmp;
+	Value data;
+	Value conflicts;
+	Value log;
 
-	Value payload;
-	Status st = createPayload<false>(doc, payload);
+	Status st;
+
+	st = json2rawdoc(doc, rawdoc, false);
 	if (st != stored) return st;
 
-	std::string tmp;
-	DatabaseCore::RawDocument rdoc;
-	if (core.findDoc(h, id.getString(), curRev,rdoc, tmp)) return stored;
-	serializePayload(0,doc["log"], payload, tmp);
-	rdoc.revision = curRev;
-	rdoc.payload = tmp;
-	core.storeUpdate(h, rdoc);
+	st = loadDataConflictsLog(doc, &data, &conflicts,&log);
+	if (st != stored) return st;
+
+	if (core.findDoc(h, rawdoc.docId, rawdoc.revision,prevdoc, tmp)) return stored;
+
+	serializePayload(log, conflicts, data, tmp);
+	rawdoc.payload = tmp;
+	core.storeUpdate(h, rawdoc);
 	return stored;
-}
 
-bool DocumentDB::parsePayload(std::string_view p, unsigned char *version, json::Value *log, json::Value *payload) {
-	JsonSource src(p);
-	unsigned char v = static_cast<unsigned char>(src());
-	if (v != 0) return false;
-	Value l = Value::parseBinary(src,base64);
-	if (payload) *payload = Value::parseBinary(src,base64);
-	if (log) *log = l;
-	if (version) *version = v;
-	return true;
 }
 
 
+Value DocumentDB::parseDocument(const DatabaseCore::RawDocument& doc, OutputFormat format) {
 
-Value DocumentDB::parseDocument(const DatabaseCore::RawDocument& doc, bool withLog) {
 
+	if (doc.deleted && format != OutputFormat::deleted) return Value();
 
 	Object jdoc;
 	std::string tmp;
 
-	serializeStrRev(doc.revision,tmp);
+	jdoc.set("id",doc.docId)
+			("rev",serializeStrRev(doc.revision))
+			("seq",doc.seq_number)
+			("deleted",doc.deleted?Value(true):Value())
+			("timestamp",doc.timestamp);
 
-	jdoc.set("id",doc.docId);
-	jdoc.set("rev",tmp);
-	jdoc.set("seq",doc.seq_number);
 
+	if (static_cast<int>(format & (OutputFormat::data | OutputFormat::log))) {
 
-	Value log;
-	Value payload;
-	parsePayload(doc.payload, nullptr, &log, &payload);
+		std::string_view p = doc.payload;
+		Value log = Value::parseBinary(JsonSource(p), base64);
+		if (format == OutputFormat::data) {
+			Value conflicts = Value::parseBinary(JsonSource(p), base64);
+			Value data = Value::parseBinary(JsonSource(p),base64);
 
-	jdoc.set("data", payload[0]);
-	jdoc.set("timestamp", payload[1]);
-	if (!payload[2].empty()) jdoc.set("conflicts", payload[2]);
-	if (payload[3].getBool()) jdoc.set("deleted",true);
-
-	if (withLog) {
-		Array a;
-		a.reserve(log.size());
-		for (Value v:log) {
-			serializeStrRev(v.getUInt(), tmp);
-			a.push_back(tmp);
+			Array c;
+			for (Value v:conflicts) {
+				c.push_back(serializeStrRev(v.getUInt()));
+			}
+			jdoc.set("data", data);
+			if (!c.empty())
+				jdoc.set("conflicts",c);
 		}
-		jdoc.set("log",log);
+		if (format == OutputFormat::log) {
+			Array c;
+			for (Value v:log) {
+				c.push_back(serializeStrRev(v.getUInt()));
+			}
+			jdoc.set("log",c);
+		}
 	}
-
 	return jdoc;
 
 }
+
+static auto createJsonSerializer(OutputFormat &fmt, DocumentDB::ResultCB &cb) {
+	return [fmt, cb](const DatabaseCore::RawDocument &doc) {
+		Value v = DocumentDB::parseDocument(doc, fmt);
+		if (v.defined() && !cb(v)) return false;
+		return true;
+	};
+}
+
+bool DocumentDB::listDocs(Handle h, const std::string_view& id, bool reversed,
+		OutputFormat format, ResultCB&& callback) {
+	return core.enumDocs(h,id,reversed,createJsonSerializer(format,callback));
+}
+
+bool DocumentDB::listDocs(Handle h, const std::string_view& start,
+		const std::string_view& end, OutputFormat format, ResultCB&& callback) {
+	return core.enumDocs(h,start,end,createJsonSerializer(format,callback));
+}
+
 
 } /* namespace sofadb */

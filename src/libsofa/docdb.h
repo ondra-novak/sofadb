@@ -15,6 +15,39 @@
 
 namespace sofadb {
 
+enum class OutputFormat {
+	///return metadata only
+	metadata_only = 0,
+	///return user data
+	data = 1,
+	///return revision log
+	log = 2,
+	///return data and log
+	data_and_log = 3,
+	///also return deleted item
+	deleted = 4,
+	///return user data including deleted
+	data_and_deleted = 5,
+	///return revision log including deleted
+	log_and_deleted = 6,
+	///return everytjing
+	data_and_log_and_deleted = 7
+};
+
+inline OutputFormat operator|(OutputFormat a, OutputFormat b) {
+	return static_cast<OutputFormat>(static_cast<int>(a) |  static_cast<int>(b));
+}
+inline OutputFormat operator&(OutputFormat a, OutputFormat b) {
+	return static_cast<OutputFormat>(static_cast<int>(a) &  static_cast<int>(b));
+}
+inline bool operator == (OutputFormat a, OutputFormat b) {
+	int c = (static_cast<int>(a) & static_cast<int>(b));
+	return (c == static_cast<int>(b) || c == static_cast<int>(a));
+}
+inline bool operator != (OutputFormat a, OutputFormat b) {
+	return !(a == b);
+}
+
 class DocumentDB {
 public:
 	DocumentDB(DatabaseCore &core);
@@ -27,8 +60,12 @@ public:
 		error_id_must_be_string,
 		error_rev_must_be_string,
 		error_conflicts_must_be_array,
+		error_conflict_must_be_string,
 		error_deleted_must_be_bool,
-		error_timestamp_must_be_number
+		error_timestamp_must_be_number,
+		error_data_is_manadatory,
+		error_log_is_mandatory,
+		error_log_item_must_be_string
 	};
 
 	typedef DatabaseCore::Handle Handle;
@@ -67,27 +104,34 @@ public:
 	 */
 	Status replicator_put_history(Handle h, const json::Value &doc);
 
+	json::Value get(Handle h, const std::string_view &id, OutputFormat format);
 
-	json::Value get(Handle h, const std::string_view &id, bool withlog);
+	json::Value get(Handle h, const std::string_view &id, const std::string_view &rev, OutputFormat format);
 
-	json::Value get(Handle h, const std::string_view &id, const std::string_view &rev, bool withlog);
+	typedef std::function<bool(const json::Value &)> ResultCB;
 
+	bool listDocs(Handle h, const std::string_view &id, bool reversed, OutputFormat format, ResultCB &&callback);
+
+	bool listDocs(Handle h, const std::string_view &start, const std::string_view &end, OutputFormat format, ResultCB &&callback);
 
 
 	static std::uint64_t getTimestamp();
 
-	static json::Value parseDocument(const DatabaseCore::RawDocument &doc, bool withLog);
+	static json::Value parseDocument(const DatabaseCore::RawDocument &doc, OutputFormat format);
 
 	static RevID parseStrRev(const std::string_view &strrev);
-	static void serializeStrRev(RevID rev, std::string &out, int leftZeroes=11);
+	static char *serializeStrRev(RevID rev, char *out, int leftZeroes = 12);
+	static json::String serializeStrRev(RevID rev);
 
 protected:
 	DatabaseCore &core;
 
-	template<bool overwrite_timestamp>
 	static Status createPayload(const json::Value &doc, json::Value &payload);
-	static void serializePayload(unsigned char version, const json::Value &newhst, const json::Value &payload, std::string &tmp);
-	static bool parsePayload(std::string_view p, unsigned char *version, json::Value *log, json::Value *payload);
+	static void serializePayload(const json::Value &newhst, const json::Value &conflicts, const json::Value &payload, std::string &tmp);
+	static Status json2rawdoc(const json::Value &doc, DatabaseCore::RawDocument  &rawdoc, bool new_edit);
+	static Status loadDataConflictsLog(const json::Value &doc, json::Value *data, json::Value *conflicts, json::Value *log);
+
+
 };
 
 } /* namespace sofadb */

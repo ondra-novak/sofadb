@@ -31,7 +31,7 @@ protected:
 	bool end(KeyValue &row);
 	bool fill(KeyValue &row);
 	void init(const std::string_view &start, bool rev);
-	virtual bool testKey(std::string_view &key) const;
+	virtual bool testKey(std::string_view &key) const = 0;
 };
 
 class LevelDBIteratorPrefix: public LevelDBIteratorBase {

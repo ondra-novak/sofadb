@@ -56,9 +56,54 @@ void DatabaseCore::loadDBs() {
 			nfo->nextSeqNum = 1;
 		}
 
+
+		key_dbconfig(nfo->key,c.second);
+		Iterator iter(maindb->findRange(nfo->key,false));
+		while (iter.getNext()) {
+			std::string_view prop;
+			extract_from_key(iter->first, nfo->key.length(), prop);
+			if (prop == "logsize") {
+				extract_value(iter->second,nfo->logsize);
+			} else 	if (prop == "historysize") {
+				extract_value(iter->second,nfo->age);
+			}
+
+		}
 		dblist[c.second] = std::move(nfo);
 	}
 
+
+}
+
+std::size_t DatabaseCore::getMaxLogSize(Handle h) {
+	PInfo nfo = getDatabaseState(h);
+	return nfo->logsize;
+}
+
+template<typename T>
+void DatabaseCore::storeProp(PInfo nfo, Handle h, std::string_view name, const T &prop) {
+	key_dbconfig(nfo->key, h, name);
+	serialize_value(nfo->value, prop);
+	PChangeset chg = beginBatch(nfo);
+	chg->put(nfo->key, nfo->value);
+	endBatch(nfo);
+}
+
+void DatabaseCore::setMaxLogSize(Handle h, std::size_t sz) {
+	PInfo nfo = getDatabaseState(h);
+	nfo->logsize = sz;
+	storeProp(nfo, h, "logsize", sz);
+}
+
+std::size_t DatabaseCore::getMaxAge(Handle h) {
+	PInfo nfo = getDatabaseState(h);
+	return nfo->age;
+}
+
+void DatabaseCore::setMaxAge(Handle h, std::size_t sz) {
+	PInfo nfo = getDatabaseState(h);
+	nfo->age = sz;
+	storeProp(nfo, h, "historysize", sz);
 }
 
 void DatabaseCore::loadViews() {
@@ -111,14 +156,13 @@ DatabaseCore::Handle DatabaseCore::create(const std::string_view& name) {
 	Info &nfo = *dblist[h];
 	nfo.name = name;
 	nfo.nextSeqNum = 1;
-	idmap.insert(std::pair(nfo.name,h));
+	idmap.insert(std::pair<std::string_view, Handle>(nfo.name,h));
 
-	std::string key,value;
-	key_db_map(key,name);
-	serialize_value(value,h);
+	key_db_map(nfo.key,name);
+	serialize_value(nfo.value,h);
 
 	PChangeset chst = maindb->createChangeset();
-	chst->put(key,value);
+	chst->put(nfo.key,nfo.value);
 	chst->commit();
 
 	return h;
@@ -197,6 +241,7 @@ PChangeset DatabaseCore::beginBatch(PInfo &nfo) {
 	return nfo->writeState.curBatch;
 }
 
+
 bool DatabaseCore::storeUpdate(Handle h, const RawDocument& doc) {
 
 	PInfo nfo = getDatabaseState(h);
@@ -206,8 +251,8 @@ bool DatabaseCore::storeUpdate(Handle h, const RawDocument& doc) {
 
 	//generate new sequence id
 	auto seqid = nfo->nextSeqNum++;
-	//prepare value header (contains revision and seqid)
-	serialize_value(nfo->value, doc.revision, seqid, doc.payload);
+
+	document2value(nfo->value,  doc, seqid);
 
 	//prepare key (contains docid)
 	key_docs(nfo->key,h,doc.docId);
@@ -260,7 +305,7 @@ bool DatabaseCore::storeToHistory(Handle h, const RawDocument &doc) {
 	PChangeset chng = beginBatch(nfo);
 
 	key_doc_revs(nfo->key, h,doc.docId, doc.revision);
-	serialize_value(nfo->value,doc.revision, doc.seq_number,doc.payload);
+	document2value(nfo->value,  doc, doc.seq_number);
 	chng->put(nfo->key, nfo->value);
 
 	endBatch(nfo);
@@ -347,8 +392,8 @@ void DatabaseCore::eraseHistoricalDoc(Handle h, const std::string_view& docid,
 
 }
 
-void DatabaseCore::enumDocs(Handle h, const std::string_view& prefix,
-		 bool reversed, std::function<void(const RawDocument&)> callback) {
+bool DatabaseCore::enumDocs(Handle h, const std::string_view& prefix,
+		 bool reversed, std::function<bool(const RawDocument&)> callback) {
 
 	RawDocument dinfo;
 	std::string key;
@@ -358,14 +403,15 @@ void DatabaseCore::enumDocs(Handle h, const std::string_view& prefix,
 	while (iter.getNext()) {
 		value2document(iter->second, dinfo);
 		extract_from_key(iter->first, skip, dinfo.docId);
-		callback(dinfo);
+		if (!callback(dinfo)) return false;
 	}
+	return true;
 
 }
 
-void DatabaseCore::enumDocs(Handle h, const std::string_view& start_include,
+bool DatabaseCore::enumDocs(Handle h, const std::string_view& start_include,
 		const std::string_view& end_exclude,
-		std::function<void(const RawDocument&)> callback) {
+		std::function<bool(const RawDocument&)> callback) {
 
 	RawDocument dinfo;
 	std::string key1, key2;
@@ -376,8 +422,9 @@ void DatabaseCore::enumDocs(Handle h, const std::string_view& start_include,
 	while (iter.getNext()) {
 		value2document(iter->second, dinfo);
 		extract_from_key(iter->first, skip, dinfo.docId);
-		callback(dinfo);
+		if (!callback(dinfo)) return false;
 	}
+	return true;
 
 }
 
@@ -534,9 +581,18 @@ bool DatabaseCore::onBatchClose(Handle h, Callback &&cb) {
 	return true;
 }
 
+void DatabaseCore::document2value(std::string& value, const RawDocument& doc, SeqNum seqid) {
+	serialize_value(value, doc.revision, seqid, doc.timestamp,
+			static_cast<unsigned char>(doc.version | (doc.deleted ? 0x80 : 0)), doc.payload);
+}
+
+
 void DatabaseCore::value2document(const std::string_view &value, RawDocument &doc) {
 	KCursor kc;
-	extract_value(value,doc.revision, doc.seq_number, kc);
+	unsigned char ver_del;
+	extract_value(value,doc.revision, doc.seq_number, doc.timestamp, ver_del, kc);
+	doc.version = ver_del & 0x7F;
+	doc.deleted = (ver_del & 0x80) != 0;
 	doc.payload = kc(value);
 }
 
