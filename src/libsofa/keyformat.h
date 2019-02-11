@@ -172,7 +172,7 @@ template<typename ... Args> inline unsigned int extract_from_key(const std::stri
 
 template<typename ... Args>
 inline unsigned int extract_from_key(const std::string_view &key, std::size_t skip, std::uint64_t &v, Args &... vars) {
-	if (key.length()<=skip+8) return 0;
+	if (key.length()<skip+8) return 0;
 	v = 0;
 	for (std::size_t i = 0; i < 8; i++) {
 		v = (v << 8) | static_cast<unsigned char>(key[i+skip]);
@@ -184,7 +184,7 @@ inline unsigned int extract_from_key(const std::string_view &key, std::size_t sk
 
 template<typename ... Args>
 inline unsigned int extract_from_key(const std::string_view &key, std::size_t skip, std::uint32_t &v, Args &... vars) {
-	if (key.length()<=skip+4) return 0;
+	if (key.length()<skip+4) return 0;
 	v = 0;
 	for (std::size_t i = 0; i < 4; i++) {
 		v = (v << 8) | static_cast<unsigned char>(key[i+skip]);
@@ -210,14 +210,14 @@ inline unsigned int extract_from_key(const std::string_view &key, std::size_t sk
 
 template<typename ... Args>
 inline unsigned int extract_from_key(const std::string_view &key, std::size_t skip, unsigned char &v, Args &... vars) {
-	if (key.length()<=skip+1) return 0;
+	if (key.length()<skip+1) return 0;
 	v = static_cast<unsigned char>(key[skip]);
 	return 1+extract_from_key(key,skip+1,vars...);
 }
 
 template<typename ... Args>
 inline unsigned int extract_from_key(const std::string_view &key, std::size_t skip, char &v, Args &... vars) {
-	if (key.length()<=skip+1) return 0;
+	if (key.length()<skip+1) return 0;
 	v = key[skip];
 	return 1+extract_from_key(key,skip+1,vars...);
 }

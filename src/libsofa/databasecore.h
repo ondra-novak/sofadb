@@ -16,16 +16,28 @@
 #include "types.h"
 #include "kvapi.h"
 #include <mutex>
+#include <functional>
+
 
 namespace sofadb {
 
 class DatabaseCore {
 public:
 
+	enum ObserverEvent {
+		//a database has been created
+		event_create,
+		//a database content has been updated
+		event_update,
+		//a database has been destroyed (closed)
+		event_close
+	};
+
 	typedef std::uint32_t Handle;
 	static const Handle invalid_handle = static_cast<Handle>(-1);
 
 	typedef std::function<void()> Callback;
+	typedef std::function<void(ObserverEvent, Handle, SeqNum)> Observer;
 	typedef std::set<std::string> KeySet;
 
 private:
@@ -92,6 +104,7 @@ public:
 	Handle create(const std::string_view &name);
 	Handle getHandle(const std::string_view &name) const;
 	void erase(Handle h);
+	bool rename(Handle h, const std::string_view &newname);
 
 
 	template<typename Fn> auto list(Fn &&fn) const -> decltype((bool)fn(std::string())) {
@@ -411,12 +424,24 @@ public:
 	std::size_t getMaxAge(Handle h);
 	void setMaxAge(Handle h, std::size_t sz);
 
+	///Sets observer
+	/** There can be one observer which is called on every update in any databse.
+	 * The observer receives handle of the database
+	 *
+	 * @param observer
+	 */
+	void setObserver(Observer &&observer);
+
 protected:
 
 	PKeyValueDatabase maindb;
 	DBList dblist;
 	NameToIDMap idmap;
 	ViewID nextViewID;
+	mutable std::recursive_mutex lock;
+	Observer observer;
+
+
 
 
 	Handle allocSlot() ;
@@ -428,7 +453,6 @@ protected:
 	void value2document(const std::string_view &value, RawDocument &doc);
 	void document2value(std::string& value, const RawDocument& doc, SeqNum seqid);
 
-	mutable std::recursive_mutex lock;
 
 
 	void deleteViewRaw(Handle h, ViewID view);

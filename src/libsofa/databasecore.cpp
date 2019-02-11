@@ -8,6 +8,7 @@
 #include <imtjson/array.h>
 #include <imtjson/object.h>
 #include <libsofa/databasecore.h>
+#include <shared/logOutput.h>
 #include "keyformat.h"
 #include "kvapi_leveldb.h"
 
@@ -41,6 +42,10 @@ void DatabaseCore::loadDBs() {
 	}
 	dblist.resize(maxHandle+1);
 	for (auto &&c:tmpstorage) {
+		if (dblist[c.second] != nullptr) {
+			ondra_shared::logError("Can't load database $1 - handle conflict", c.first);
+			continue;
+		}
 		auto nfo = std::make_unique<Info>();
 		nfo->name = c.first;
 		idmap[nfo->name] = c.second;
@@ -165,6 +170,8 @@ DatabaseCore::Handle DatabaseCore::create(const std::string_view& name) {
 	chst->put(nfo.key,nfo.value);
 	chst->commit();
 
+	if (observer) observer(event_create,h,0);
+
 	return h;
 }
 
@@ -183,6 +190,8 @@ void DatabaseCore::erase(Handle h) {
 	if (nfo == nullptr) return ;
 
 	idmap.erase(nfo->name);
+
+	if (observer) observer(event_close, h,nfo->nextSeqNum);
 
 	onBatchClose(h,[h,this]() {
 		std::unique_ptr<Info> nfo (std::move(dblist[h]));
@@ -295,6 +304,9 @@ bool DatabaseCore::storeUpdate(Handle h, const RawDocument& doc) {
 	chng->put(nfo->key,nfo->value);
 	//all done
 	endBatch(nfo);
+
+	if (observer) observer(event_update, h, seqid);
+
 	return true;
 }
 
@@ -379,6 +391,7 @@ void DatabaseCore::eraseDoc(Handle h, const std::string_view& docid, KeySet &mod
 	}
 
 	endBatch(nfo);
+
 }
 
 void DatabaseCore::eraseHistoricalDoc(Handle h, const std::string_view& docid,
@@ -684,6 +697,35 @@ ViewID DatabaseCore::findView(Handle h, const std::string_view& name) {
 	if (iter == dbf->viewNameToID.end()) return 0;
 	return iter->second;
 }
+
+bool DatabaseCore::rename(Handle h, const std::string_view& newname) {
+	if (newname.empty()) return false;
+	auto dbf = getDatabaseState(h);
+	std::lock_guard<std::recursive_mutex> _(lock);
+	auto newn = idmap.find(newname);
+	if (newn == idmap.end()) {
+		idmap.erase(dbf->name);
+		key_db_map(dbf->key, dbf->name);
+		dbf->name = newname;
+		key_db_map(dbf->key2, dbf->name);
+		idmap.insert(std::pair<std::string_view,Handle>(dbf->name, h));
+
+		serialize_value(dbf->value,h);
+
+		PChangeset chst = maindb->createChangeset();
+		chst->erase(dbf->key);
+		chst->put(dbf->key2,dbf->value);
+		chst->commit();
+		return true;
+	} else {
+		return false;
+	}
+}
+
+void DatabaseCore::setObserver(Observer&& observer) {
+	this->observer = std::move(observer);
+}
+
 
 
 } /* namespace sofadb */

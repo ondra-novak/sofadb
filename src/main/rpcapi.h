@@ -24,10 +24,17 @@ public:
 	void databaseCreate(json::RpcRequest req);
 	void databaseDelete(json::RpcRequest req);
 	void databaseList(json::RpcRequest req);
+	void databaseRename(json::RpcRequest req);
+	void documentGet(json::RpcRequest req);
+	void documentPut(json::RpcRequest req);
+	void documentList(json::RpcRequest req);
 
 protected:
 	DatabaseCore &db;
 	DocumentDB docdb;
+
+	bool arg0ToHandle(json::RpcRequest req, DatabaseCore::Handle &h);
+	json::Value statusToError(DocumentDB::Status st);
 
 };
 

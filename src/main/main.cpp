@@ -15,6 +15,7 @@
 #include "../libsofa/kvapi_leveldb.h"
 #include "../libsofa/databasecore.h"
 #include "../libsofa/docdb.h"
+#include "../libsofa/systemdbs.h"
 #include "rpcapi.h"
 
 using doxyhub::ServerConfig;
@@ -65,6 +66,7 @@ int main(int argc, char **argv) {
 
 		sofadb::PKeyValueDatabase db = sofadb::leveldb_open(cfg.dbopts,cfg.datapath);
 		sofadb::DatabaseCore core(db);
+		sofadb::SystemDBs sysdbs(core);
 		sofadb::DocumentDB docdb(core);
 
 
