@@ -85,6 +85,8 @@ protected:
 
 };
 
+using PEventRouter = RefCntPtr<EventRouter>;
+
 } /* namespace sofadb */
 
 #endif /* SRC_LIBSOFA_EVENTROUTER_H_ */

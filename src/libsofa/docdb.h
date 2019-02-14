@@ -34,6 +34,21 @@ enum class OutputFormat {
 	data_and_log_and_deleted = 7
 };
 
+enum class Status {
+	stored,
+	conflict,
+	db_not_found,
+	error_id_must_be_string,
+	error_rev_must_be_string,
+	error_conflicts_must_be_array,
+	error_conflict_must_be_string,
+	error_deleted_must_be_bool,
+	error_timestamp_must_be_number,
+	error_data_is_manadatory,
+	error_log_is_mandatory,
+	error_log_item_must_be_string
+};
+
 inline OutputFormat operator|(OutputFormat a, OutputFormat b) {
 	return static_cast<OutputFormat>(static_cast<int>(a) |  static_cast<int>(b));
 }
@@ -53,20 +68,6 @@ public:
 	DocumentDB(DatabaseCore &core);
 
 
-	enum Status {
-		stored,
-		conflict,
-		db_not_found,
-		error_id_must_be_string,
-		error_rev_must_be_string,
-		error_conflicts_must_be_array,
-		error_conflict_must_be_string,
-		error_deleted_must_be_bool,
-		error_timestamp_must_be_number,
-		error_data_is_manadatory,
-		error_log_is_mandatory,
-		error_log_item_must_be_string
-	};
 
 	typedef DatabaseCore::Handle Handle;
 
