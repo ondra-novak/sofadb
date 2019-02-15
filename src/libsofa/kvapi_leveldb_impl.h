@@ -57,18 +57,22 @@ protected:
 class LevelDBDatabase: public AbstractKeyValueDatabase {
 public:
 
-	LevelDBDatabase(leveldb::DB *db);
+	LevelDBDatabase(leveldb::DB *db, const std::string_view &name);
 	virtual PChangeset createChangeset();
 	virtual PIterator findRange(const std::string_view &prefix, bool reverse = false) ;
 	virtual PIterator findRange(const std::string_view &start, const std::string_view &end) ;
 	virtual bool lookup(const std::string_view &key, std::string &value) ;
 	virtual bool exists(const std::string_view &key) ;
 	virtual bool existsPrefix(const std::string_view &key) ;
+	virtual void destroy();
 	virtual ~LevelDBDatabase();
 	leveldb::DB *getDBObject() {return db;}
 
+	bool isDestroyed() const;
+
 protected:
 	leveldb::DB *db;
+	std::string name;
 
 
 

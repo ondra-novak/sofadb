@@ -34,7 +34,7 @@ protected:
 	DocumentDB docdb;
 
 	bool arg0ToHandle(json::RpcRequest req, DatabaseCore::Handle &h);
-	json::Value statusToError(DocumentDB::Status st);
+	json::Value statusToError(PutStatus st);
 
 };
 

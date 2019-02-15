@@ -28,14 +28,17 @@ using ondra_shared::Worker;
 class EventRouter: public RefCntObj {
 
 public:
+	typedef DatabaseCore::Handle Handle;
 	typedef std::function<void()> Observer;
 	typedef std::vector<Observer> ObserverList;
+	typedef std::function<void(DatabaseCore::ObserverEvent, Handle, SeqNum)> GlobalObserver;
+	typedef std::vector<GlobalObserver> GlobalObserverList;
 	typedef const void *WaitHandle;
+	typedef const void *ObserverHandle;
 
 	///EventRouter need Worker as backend. Worker defines threads
 	EventRouter(Worker worker);
 
-	typedef DatabaseCore::Handle Handle;
 
 	///Called for new event from the database
 	/**
@@ -69,6 +72,30 @@ public:
 	 */
 	bool cancelWait(Handle db, WaitHandle wh);
 
+
+	///registers global event observer
+	/** This allows to listen all events in the database
+	 *
+	 * @param observer observer
+	 * @return handle, which can be used to removeObserver
+	 *
+	 * Because it would be possible to lost event while the observer is processing preceding event,
+	 * the observer is not registered for one shot. You need to remove observer when you need
+	 * to stop receiving the events.
+	 *
+	 * @see removeObserver
+	 */
+	ObserverHandle registerObserver(GlobalObserver &&observer);
+
+	///Removes global observer
+	/**
+	 * @param wh handle received by registerObserver
+	 * @retval true removed
+	 * @retval false not found
+	 */
+	bool removeObserver(ObserverHandle wh);
+
+
 protected:
 
 
@@ -80,6 +107,7 @@ protected:
 	typedef std::unordered_map<Handle, Listener> HandleMap;
 	typedef std::unique_lock<std::recursive_mutex> Sync;
 	HandleMap hmap;
+	GlobalObserverList globlist;
 	Worker worker;
 	std::recursive_mutex lock;
 

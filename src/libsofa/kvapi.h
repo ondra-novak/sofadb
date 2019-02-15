@@ -91,6 +91,10 @@ namespace sofadb {
 
 		virtual bool existsPrefix(const std::string_view &key) = 0;
 
+		///Destroy pernament storage
+		/** function doesn't destroy anything until the object is destroyed */
+		virtual void destroy() = 0;
+
 		virtual ~AbstractKeyValueDatabase() {};
 
 

@@ -24,7 +24,18 @@ const char *LevelDBException::what() const noexcept {
 PKeyValueDatabase leveldb_open(const leveldb::Options& options, const std::string& name) {
 	leveldb::DB *db;
 	leveldb::Status st = leveldb::DB::Open(options,name,&db);
-	if (st.ok()) return new LevelDBDatabase(db);
+	if (st.ok()) {
+		LevelDBDatabase *d;
+		PKeyValueDatabase kvdb = d = new LevelDBDatabase(db, name);
+		if (d->isDestroyed()) {
+			///this should delete database because it is deleted in destructor
+			kvdb = nullptr;
+			return leveldb_open(options, name);
+		}
+		else {
+			return kvdb;
+		}
+	}
 	else throw LevelDBException(st);
 }
 

@@ -4,7 +4,11 @@
 
 namespace sofadb {
 
-LevelDBDatabase::LevelDBDatabase(leveldb::DB *db):db(db) {}
+static const std::string destroy_key="~destroy";
+
+LevelDBDatabase::LevelDBDatabase(leveldb::DB *db, const std::string_view &name):db(db),name(name) {
+
+}
 
 
 inline leveldb::Slice str2slice(const std::string_view &w) {
@@ -75,7 +79,9 @@ bool LevelDBDatabase::existsPrefix(const std::string_view& key) {
 
 
 LevelDBDatabase::~LevelDBDatabase() {
+	bool d = isDestroyed();
 	delete db;
+	if (d) leveldb::DestroyDB(name, leveldb::Options());
 }
 
 
@@ -207,5 +213,13 @@ bool LevelDBIteratorRange::testKey(std::string_view &key) const {
 	return rev?(key > end):(key < end);
 }
 
+void LevelDBDatabase::destroy() {
+	db->Put(leveldb::WriteOptions(), destroy_key, leveldb::Slice(nullptr,0));
 }
 
+bool LevelDBDatabase::isDestroyed() const {
+	std::string dummy;
+	return db->Get(leveldb::ReadOptions(), destroy_key, &dummy).ok();
+}
+
+}

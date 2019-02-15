@@ -432,6 +432,17 @@ public:
 	 */
 	void setObserver(Observer &&observer);
 
+
+	///Destroyes everything removing all data to all databases and files from the disk
+	/** Note function only marks database as destroyed. You need to also destroy the object
+	 * with the database to operation take an effect.
+	 *
+	 * So after the function returns, you still can use the database. Also note that request is
+	 * stored in memory, so leaving program without destroying the database object doesn't cause
+	 * removing the database from the disk
+	 */
+	void destroy();
+
 protected:
 
 	PKeyValueDatabase maindb;

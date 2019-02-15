@@ -128,13 +128,13 @@ void RpcAPI::documentGet(json::RpcRequest req) {
 
 }
 
-Value RpcAPI::statusToError(DocumentDB::Status st) {
+Value RpcAPI::statusToError(PutStatus st) {
 	unsigned int code;
 	String message;
 	switch (st) {
-	case DocumentDB::conflict: code = 409; message = "conflict";break;
-	case DocumentDB::db_not_found: code = 404; message = "db_not_found";break;
-	case DocumentDB::error_log_is_mandatory: code = 400; message = "'log' is mandatory";break;
+	case PutStatus::conflict: code = 409; message = "conflict";break;
+	case PutStatus::db_not_found: code = 404; message = "db_not_found";break;
+	case PutStatus::error_log_is_mandatory: code = 400; message = "'log' is mandatory";break;
 	default:
 		code=500; message = "unknown_error";
 		ondra_shared::logError("Unknown status $1", static_cast<unsigned int>(st));
@@ -163,15 +163,15 @@ void RpcAPI::documentPut(json::RpcRequest req) {
 
 	Value doc = req.getArgs()[1];
 
-	DocumentDB::Status st;
+	PutStatus st;
 	String newrev;
 
 	if (replication) {
 		st = docdb.replicator_put(h,doc);
-		if (st == docdb.stored) return req.setResult(true);
+		if (st == PutStatus::stored) return req.setResult(true);
 	} else {
 		st = docdb.client_put(h,doc, newrev);
-		if (st == docdb.stored) return req.setResult(newrev);
+		if (st == PutStatus::stored) return req.setResult(newrev);
 	}
 
 	req.setError(statusToError(st));

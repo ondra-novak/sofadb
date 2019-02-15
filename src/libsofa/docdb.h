@@ -34,7 +34,7 @@ enum class OutputFormat {
 	data_and_log_and_deleted = 7
 };
 
-enum class Status {
+enum class PutStatus {
 	stored,
 	conflict,
 	db_not_found,
@@ -82,7 +82,7 @@ public:
 	 *
 	 * @caller can open batch at DatabaseCore if it need to put documents atomically
 	 */
-	Status client_put(Handle h, const json::Value &doc, json::String &rev);
+	PutStatus client_put(Handle h, const json::Value &doc, json::String &rev);
 	///Puts replicated d1ocument
 	/**
 	 * The replicated document contains rev which have its actual revision. It must
@@ -92,7 +92,7 @@ public:
 	 * @param doc document to put
 	 * @return status
 	 */
-	Status replicator_put(Handle h, const json::Value &doc);
+	PutStatus replicator_put(Handle h, const json::Value &doc);
 	///Puts document to the history.
 	/** The document is stored as history, doesn't change current top
 	 *
@@ -103,7 +103,7 @@ public:
 	 *
 	 * @return status
 	 */
-	Status replicator_put_history(Handle h, const json::Value &doc);
+	PutStatus replicator_put_history(Handle h, const json::Value &doc);
 
 	json::Value get(Handle h, const std::string_view &id, OutputFormat format);
 
@@ -127,10 +127,10 @@ public:
 protected:
 	DatabaseCore &core;
 
-	static Status createPayload(const json::Value &doc, json::Value &payload);
+	static PutStatus createPayload(const json::Value &doc, json::Value &payload);
 	static void serializePayload(const json::Value &newhst, const json::Value &conflicts, const json::Value &payload, std::string &tmp);
-	static Status json2rawdoc(const json::Value &doc, DatabaseCore::RawDocument  &rawdoc, bool new_edit);
-	static Status loadDataConflictsLog(const json::Value &doc, json::Value *data, json::Value *conflicts, json::Value *log);
+	static PutStatus json2rawdoc(const json::Value &doc, DatabaseCore::RawDocument  &rawdoc, bool new_edit);
+	static PutStatus loadDataConflictsLog(const json::Value &doc, json::Value *data, json::Value *conflicts, json::Value *log);
 
 
 };

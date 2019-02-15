@@ -16,26 +16,20 @@ EventRouter::EventRouter(Worker worker):worker(worker) {
 void EventRouter::receiveEvent(DatabaseCore::ObserverEvent event,
 		Handle h, SeqNum seqnum) {
 
-	RefCntPtr<EventRouter> ptr(this);
-	worker >> [ptr,h,event, seqnum] {
-
-		ObserverList el;
-		{
-			Sync _(ptr->lock);
-			Listener &lst = ptr->hmap[h];
-			std::swap(lst.olist,el);
-			if (event == DatabaseCore::event_close) {
-				ptr->hmap.erase(h);
-			}
-			else {
-				lst.lastSeqNum = seqnum;
-				lst.olist.reserve(el.size());
-			}
-		}
-		for (auto &&x: el) {
-			x();
-		}
-	};
+	Sync _(lock);
+	Listener &lst = hmap[h];
+	for (auto &&c : lst.olist) {
+		worker >> c;
+	}
+	lst.olist.clear();
+	for (auto &&c : globlist) {
+		worker >> [event,h,seqnum,fn = GlobalObserver(c)] {
+			fn(event,h,seqnum);
+		};
+	}
+	if (event == DatabaseCore::event_close) {
+		hmap.erase(h);
+	}
 
 }
 
@@ -62,9 +56,28 @@ bool EventRouter::cancelWait(Handle db, WaitHandle wh) {
 	Sync _(lock);
 	auto iter = hmap.find(db);
 	if (iter == hmap.end()) return false;
-	for (std::size_t i = 0, cnt = iter->second.olist.size(); i < cnt; i++) {
-		if (iter->second.olist[i].target<void>() == wh) {
-			iter->second.olist.erase(iter->second.olist.begin()+i);
+	ObserverList &olist = iter->second.olist;
+	for (auto i = olist.begin(); i!=olist.end(); ++iter) {
+		if (i->target<void>() == wh) {
+			olist.erase(i);
+			return true;
+		}
+	}
+	return false;
+}
+
+EventRouter::ObserverHandle EventRouter::registerObserver(GlobalObserver&& observer) {
+	ObserverHandle h = observer.target<void>();
+	Sync _(lock);
+	globlist.push_back(std::move(observer));
+	return h;
+}
+
+bool EventRouter::removeObserver(ObserverHandle wh) {
+	Sync _(lock);
+	for  (auto iter = globlist.begin(); iter != globlist.end(); ++iter) {
+		if (iter->target<void>() == wh) {
+			globlist.erase(iter);
 			return true;
 		}
 	}

@@ -22,11 +22,14 @@ class SofaDB {
 public:
 
 	SofaDB(PKeyValueDatabase kvdatabase);
+	SofaDB(PKeyValueDatabase kvdatabase, Worker worker);
 
 	using Handle = DatabaseCore::Handle;
 	using Filter = std::function<json::Value(const json::Value &)>();
 	using ResultCB = DocumentDB::ResultCB;
 	using WaitHandle = EventRouter::WaitHandle;
+	using GlobalObserver = EventRouter::GlobalObserver;
+	using ObserverHandle = EventRouter::ObserverHandle;
 
 	static const Handle invalid_handle = DatabaseCore::invalid_handle;
 
@@ -118,7 +121,7 @@ public:
 	 *
 	 * @not Function can internally merge the result
 	 */
-	Status put(Handle db, json::Value &doc);
+	PutStatus put(Handle db, json::Value &doc);
 	///Replicates document from other database
 	/**
 	 * @param db database handle
@@ -128,7 +131,7 @@ public:
 	 *   other error.
 	 *
 	 */
-	Status replicatorPut(Handle db, const json::Valye &doc, bool history);
+	PutStatus replicatorPut(Handle db, const json::Value &doc, bool history);
 	///Retrieves document from the database
 	/**
 	 * @param h handle to database
@@ -155,7 +158,7 @@ public:
 	 * @param revid revision id
 	 *
 	 */
-	Status erase(Handle h, const std::string_view &docid, const std::string_view &revid);
+	PutStatus erase(Handle h, const std::string_view &docid, const std::string_view &revid);
 
 	///Purges historical revision
 	void purge(Handle h, const std::string_view &docid, const std::string_view &revid);
@@ -205,6 +208,12 @@ public:
 	 * @retval false invalid handle (probably already executed)
 	 */
 	bool cancelMonitor(WaitHandle wh);
+
+
+	ObserverHandle registerObserver(GlobalObserver &&observer);
+
+	bool removeObserver(ObserverHandle handle);
+
 
 public:
 
