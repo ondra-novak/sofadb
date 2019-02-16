@@ -193,9 +193,9 @@ LevelDBIteratorPrefix::LevelDBIteratorPrefix(std::string &&prefix, leveldb::Iter
 {
 
 	if (rev) {
-		init(prefixLastKey(prefix),true);
+		init(prefixLastKey(this->prefix),true);
 	} else {
-		init(prefix, false);
+		init(this->prefix, false);
 	}
 }
 bool LevelDBIteratorPrefix::testKey(std::string_view &key) const {

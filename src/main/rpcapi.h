@@ -9,14 +9,15 @@
 #define SRC_MAIN_RPCAPI_H_
 
 #include <imtjson/rpc.h>
-#include "../libsofa/databasecore.h"
-#include "../libsofa/docdb.h"
+#include "../libsofa/api.h"
 
 namespace sofadb {
 
 class RpcAPI {
+
+	typedef SofaDB::Handle Handle;
 public:
-	RpcAPI(DatabaseCore &db):db(db),docdb(db) {}
+	RpcAPI(SofaDB &db):db(db) {}
 
 	void init(json::RpcServer &server);
 
@@ -30,8 +31,8 @@ public:
 	void documentList(json::RpcRequest req);
 
 protected:
-	DatabaseCore &db;
-	DocumentDB docdb;
+	SofaDB &db;
+
 
 	bool arg0ToHandle(json::RpcRequest req, DatabaseCore::Handle &h);
 	json::Value statusToError(PutStatus st);

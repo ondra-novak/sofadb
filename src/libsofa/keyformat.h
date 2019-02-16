@@ -243,6 +243,7 @@ inline unsigned int extract_from_key(const std::string_view &, std::size_t ) {
 
 template<typename ... Args>
 inline void serialize_value(std::string &value, Args && ... data) {
+	value.clear();
 	_misc::serialize_key(value,false,std::forward<Args>(data)...);
 }
 template<typename ... Args>
@@ -273,7 +274,7 @@ public:
 		target.push_back(c);
 	}
 protected:
-	std::string target;
+	std::string &target;
 };
 
 }

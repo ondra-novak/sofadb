@@ -76,14 +76,14 @@ PutStatus DocumentDB::createPayload(const json::Value &doc, json::Value &payload
 json::Value DocumentDB::get(Handle h, const std::string_view& id, OutputFormat oform) {
 	DatabaseCore::RawDocument rdoc;
 	std::string tmp;
-	if (!core.findDoc(h,id,rdoc,tmp)) return json::Value();
+	if (!core.findDoc(h,id,rdoc,tmp)) return nullptr;
 	return parseDocument(rdoc, oform);
 }
 
 json::Value DocumentDB::get(Handle h, const std::string_view& id, const std::string_view& rev, OutputFormat oform) {
 	DatabaseCore::RawDocument rdoc;
 	std::string tmp;
-	if (!core.findDoc(h,id,parseStrRev(rev), rdoc,tmp)) return json::Value();
+	if (!core.findDoc(h,id,parseStrRev(rev), rdoc,tmp)) return nullptr;
 	return parseDocument(rdoc, oform);
 }
 
@@ -170,7 +170,13 @@ PutStatus DocumentDB::client_put(Handle h, const json::Value &doc, json::String 
 
 	bool exists = core.findDoc(h,rawdoc.docId,prevdoc, tmp);
 	if (exists) {
-		if (prevrev_ndefined) return PutStatus::conflict;
+		if (prevrev_ndefined) {
+			if (prevdoc.deleted) {
+				rawdoc.revision = prevdoc.revision;
+			} else {
+				return PutStatus::conflict;
+			}
+		}
 		RevID revid = rawdoc.revision;
 		if (rawdoc.revision != prevdoc.revision) return PutStatus::conflict;
 		Value hst = Value::parseBinary(JsonSource(prevdoc.payload));
@@ -185,6 +191,7 @@ PutStatus DocumentDB::client_put(Handle h, const json::Value &doc, json::String 
 	}
 	serializePayload(newhst, conflicts, data, tmp);
 	rawdoc.payload = tmp;
+	rawdoc.revision = newRev;
 	core.storeUpdate(h,rawdoc);
 	tmp.clear();
 	outrev = serializeStrRev(newRev);
@@ -275,7 +282,7 @@ PutStatus DocumentDB::replicator_put_history(Handle h, const json::Value &doc) {
 Value DocumentDB::parseDocument(const DatabaseCore::RawDocument& doc, OutputFormat format) {
 
 
-	if (doc.deleted && format != OutputFormat::deleted) return Value();
+	if (doc.deleted && format != OutputFormat::deleted) return nullptr;
 
 	Object jdoc;
 	std::string tmp;

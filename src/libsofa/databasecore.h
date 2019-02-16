@@ -103,7 +103,7 @@ public:
 
 	Handle create(const std::string_view &name);
 	Handle getHandle(const std::string_view &name) const;
-	void erase(Handle h);
+	bool erase(Handle h);
 	bool rename(Handle h, const std::string_view &newname);
 
 

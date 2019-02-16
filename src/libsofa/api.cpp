@@ -5,11 +5,14 @@
  *      Author: ondra
  */
 
+#include <imtjson/object.h>
+#include <imtjson/string.h>
 #include "api.h"
 
 
 namespace sofadb {
 
+using namespace json;
 
 SofaDB::SofaDB(PKeyValueDatabase kvdatabase)
 	:dbcore(kvdatabase)
@@ -62,13 +65,8 @@ bool SofaDB::allDocs(Handle db, OutputFormat outputFormat,
 		ResultCB&& cb) {
 }
 
-PutStatus SofaDB::put(Handle db, json::Value& doc) {
-	//TODO merge
-	std::string rev;
-	auto st = docdb.client_put(db,doc, &rev);
-	if (st == PutStatus::stored) {
-		doc.replace("rev", rev);
-	}
+PutStatus SofaDB::put(Handle db, const json::Value& doc, json::String &newrev) {
+	auto st = docdb.client_put(db,doc, newrev);
 	return st;
 }
 
@@ -89,29 +87,30 @@ json::Value SofaDB::get(Handle h, const std::string_view& id, const std::string_
 }
 
 PutStatus SofaDB::erase(Handle h, const std::string_view& docid, const std::string_view& revid) {
-	json::Value v = Object("id",docid)
-						("rev",revid)
+	json::Value v = Object("id",StrViewA(docid))
+						("rev",StrViewA(revid))
 						("deleted",true)
 						("value",nullptr);
-	return put(db, v);
+	String s;
+	return put(h, v, s);
 }
 
 void SofaDB::purge(Handle h, const std::string_view& docid,	const std::string_view& revid) {
-	docdb.purge(docid, revid);
+	//docdb.purge(docid, revid);
 }
 
 void SofaDB::purge(Handle h, const std::string_view& docid) {
-	docdb.purge(docid);
+	//docdb.purge(docid);
 }
 
-SofaDB::WaitHandle SofaDB::monitorChanges(Handle h, SeqNum since, OutputFormat outputFormat, std::size_t timeout, ResultDB callback) {
-	eventRouter->waitForEvent(db,since,)
+SofaDB::WaitHandle SofaDB::monitorChanges(Handle h, SeqNum since, OutputFormat outputFormat, std::size_t timeout, ResultCB  callback) {
+	//eventRouter->waitForEvent(db,since,[])
 }
 
 bool SofaDB::cancelMonitor(WaitHandle wh) {
 }
 
-ObserverHandle SofaDB::registerObserver(GlobalObserver&& observer) {
+SofaDB::ObserverHandle SofaDB::registerObserver(GlobalObserver&& observer) {
 }
 
 bool SofaDB::removeObserver(ObserverHandle handle) {
@@ -121,6 +120,10 @@ DatabaseCore& SofaDB::getDatabaseCore() {
 }
 
 DocumentDB& SofaDB::getDocumentDB() {
+}
+
+DatabaseCore& SofaDB::getDBCore() {
+	return dbcore;
 }
 
 EventRouter& SofaDB::getEventRouter() {

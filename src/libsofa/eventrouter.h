@@ -11,14 +11,22 @@
 #include <functional>
 #include <list>
 #include <unordered_map>
+#include <map>
+#include <set>
 #include "databasecore.h"
 #include <shared/worker.h>
 #include <shared/refcnt.h>
+#include <shared/scheduler.h>
+#include <shared/waitableEvent.h>
+#include <condition_variable>
+
+
 
 
 namespace sofadb {
 
 using ondra_shared::Worker;
+using ondra_shared::WaitableEvent;
 
 ///Routes database events to various observers
 /** It is executed in separate thread(s). There can be many observers for many databases
@@ -28,17 +36,35 @@ using ondra_shared::Worker;
 class EventRouter: public RefCntObj {
 
 public:
+	///observer
+	/**
+	 * @param bool true - change detected, false - timeout
+	 */
+	typedef std::function<void(bool)> Observer;
 	typedef DatabaseCore::Handle Handle;
-	typedef std::function<void()> Observer;
-	typedef std::vector<Observer> ObserverList;
+	typedef std::chrono::time_point<std::chrono::steady_clock> TimePoint;
+	typedef std::size_t WaitHandle;
+
+	struct Reg{
+		Handle db;
+		Observer observer;
+	};
+
+	typedef std::map<WaitHandle, Reg> ObserverMap;
+	typedef std::pair<Handle, WaitHandle> OPHKey;
+	typedef std::set<OPHKey> ObserverPerHandle;
+	typedef std::map<Handle, SeqNum> SeqNumMap;
+
+
 	typedef std::function<void(DatabaseCore::ObserverEvent, Handle, SeqNum)> GlobalObserver;
 	typedef std::vector<GlobalObserver> GlobalObserverList;
-	typedef const void *WaitHandle;
 	typedef const void *ObserverHandle;
 
 	///EventRouter need Worker as backend. Worker defines threads
 	EventRouter(Worker worker);
 
+
+	~EventRouter();
 
 	///Called for new event from the database
 	/**
@@ -53,24 +79,10 @@ public:
 	DatabaseCore::Observer createObserver();
 
 	///Registers observer
-	/**
-	 * @param db database handle
-	 * @param since last known sequence id for the observer
-	 * @param observer observer object
-	 * @param handle if set, receives handle of the registration. It can be used to cancel registration
-	 * @retval true registered and waiting
-	 * @retval false can't register, because there are already changes to process
-	 */
-	bool waitForEvent(Handle db, SeqNum since, Observer &&observer, WaitHandle *handle = nullptr);
+	WaitHandle  waitForEvent(Handle db, SeqNum since, std::size_t timeout, Observer &&observer);
 
 	///Cancels waiting
-	/**
-	 * @param db database handle
-	 * @param wh wait handle
-	 * @retval false not found, probably already executed
-	 * @retval true canceled
-	 */
-	bool cancelWait(Handle db, WaitHandle wh);
+	bool cancelWait(WaitHandle wh);
 
 
 	///registers global event observer
@@ -99,17 +111,19 @@ public:
 protected:
 
 
-	struct Listener {
-		ObserverList olist;
-		SeqNum lastSeqNum = 0;
-	};
+	ObserverMap omap;
+	ObserverPerHandle oph;
+	SeqNumMap snm;
 
-	typedef std::unordered_map<Handle, Listener> HandleMap;
-	typedef std::unique_lock<std::recursive_mutex> Sync;
-	HandleMap hmap;
+	typedef std::unique_lock<std::mutex> Sync;
+
 	GlobalObserverList globlist;
 	Worker worker;
-	std::recursive_mutex lock;
+	std::mutex lock;
+	std::size_t cntr = 0;
+	std::condition_variable *schevent = nullptr, *schexit = nullptr;
+
+	void reschedule();
 
 };
 

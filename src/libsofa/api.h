@@ -115,13 +115,17 @@ public:
 	///Puts document to the database
 	/**
 	 * @param db database handle
-	 * @param doc document json in correct format. Function updates this variable to contain final document
+	 * @param doc document to put
+	 * @param newrev receives new revision as json object
 	 * @return if 'stored' returned, then document has been stored otherwise it can contain 'conflict' or
 	 *   other error.
 	 *
-	 * @not Function can internally merge the result
+	 * @note Function can internally merge the result. However it returns revision of nonmerged result.
+	 * If the next put referes to nonmerged revision, it will be also merged with top revision efectivelly
+	 * creating separate branch. The only way to close that branch is to put new revision to top
+	 * of revision
 	 */
-	PutStatus put(Handle db, json::Value &doc);
+	PutStatus put(Handle db, const json::Value &doc, json::String &newrev);
 	///Replicates document from other database
 	/**
 	 * @param db database handle
@@ -197,7 +201,7 @@ public:
 				SeqNum since,
 				OutputFormat outputFormat,
 				std::size_t timeout,
-				ResultDB callback);
+				ResultCB callback);
 
 
 
@@ -214,6 +218,7 @@ public:
 
 	bool removeObserver(ObserverHandle handle);
 
+	DatabaseCore &getDBCore();
 
 public:
 

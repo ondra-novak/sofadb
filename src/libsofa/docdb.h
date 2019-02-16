@@ -35,9 +35,10 @@ enum class OutputFormat {
 };
 
 enum class PutStatus {
-	stored,
-	conflict,
-	db_not_found,
+	stored, ///< put successful - document stored unaltered
+	merged,  ///< put successful - but document has been merged (top revision is different)
+	conflict, ///< conflict - cannot be merged
+	db_not_found, ///< database not found
 	error_id_must_be_string,
 	error_rev_must_be_string,
 	error_conflicts_must_be_array,
@@ -49,11 +50,21 @@ enum class PutStatus {
 	error_log_item_must_be_string
 };
 
+struct PutStatus2Error {
+	PutStatus status;
+	int code;
+	std::string_view msg;
+};
+
+
 inline OutputFormat operator|(OutputFormat a, OutputFormat b) {
 	return static_cast<OutputFormat>(static_cast<int>(a) |  static_cast<int>(b));
 }
 inline OutputFormat operator&(OutputFormat a, OutputFormat b) {
 	return static_cast<OutputFormat>(static_cast<int>(a) &  static_cast<int>(b));
+}
+inline OutputFormat operator-(OutputFormat a, OutputFormat b) {
+	return static_cast<OutputFormat>(static_cast<int>(a) &  ~static_cast<int>(b));
 }
 inline bool operator == (OutputFormat a, OutputFormat b) {
 	int c = (static_cast<int>(a) & static_cast<int>(b));

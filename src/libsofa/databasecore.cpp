@@ -55,7 +55,7 @@ void DatabaseCore::loadDBs() {
 
 		if (maxseq.getNext()) {
 			SeqNum sq;
-			extract_value(maxseq->second,sq);
+			extract_from_key(maxseq->first,key.length(),sq);
 			nfo->nextSeqNum = sq+1;
 		} else {
 			nfo->nextSeqNum = 1;
@@ -184,10 +184,10 @@ DatabaseCore::Handle DatabaseCore::getHandle(const std::string_view& name) const
 	else return f->second;
 }
 
-void DatabaseCore::erase(Handle h) {
+bool DatabaseCore::erase(Handle h) {
 
 	PInfo nfo = getDatabaseState(h);
-	if (nfo == nullptr) return ;
+	if (nfo == nullptr) return false;
 
 	idmap.erase(nfo->name);
 
@@ -218,6 +218,7 @@ void DatabaseCore::erase(Handle h) {
 	});
 
 
+	return true;
 
 }
 
@@ -228,6 +229,7 @@ DatabaseCore::PInfo DatabaseCore::getDatabaseState(Handle h) {
 }
 
 void DatabaseCore::flushWriteState(WriteState &st) {
+	st.curBatch->commit();
 	while (!st.waiting.empty() && st.lockCount == 0) {
 		auto &&fn = std::move(st.waiting.front());
 		st.waiting.pop();
@@ -276,21 +278,19 @@ bool DatabaseCore::storeUpdate(Handle h, const RawDocument& doc) {
 
 	//so try to get current revision
 	if (maindb->lookup(nfo->key, nfo->value2)) {
-		RevID currev;
-		SeqNum curseq;
-		//extract just header - we don't need to parse whole JSON
-		extract_value(nfo->value2,currev, curseq);
+		RawDocument curdoc;
+		value2document(nfo->value2, curdoc);
 		//check: if revisions are same, this is error, stop here
-		if (currev == doc.revision) {
+		if (curdoc.revision == doc.revision) {
 			endBatch(h);
 			return false;
 		}
 		//prepare key for historical index
-		key_doc_revs(nfo->key2, h, doc.docId, currev);
+		key_doc_revs(nfo->key2, h, doc.docId, curdoc.revision);
 		//put document to the historical table
 		chng->put(nfo->key2,nfo->value2);
 		//generate its seq number
-		key_seq(nfo->key2,h,curseq);
+		key_seq(nfo->key2,h,curdoc.seq_number);
 		//erase seq_number, because only current revisions are streamed
 		chng->erase(nfo->key2);
 	}
@@ -581,8 +581,12 @@ bool DatabaseCore::view_updateDocument(Handle h, ViewID view,
 }
 
 void DatabaseCore::endBatch(PInfo &nfo) {
-	if (nfo->writeState.lockCount > 0) --nfo->writeState.lockCount;
-	flushWriteState(nfo->writeState);
+	if (nfo->writeState.lockCount > 0) {
+		--nfo->writeState.lockCount;
+		if (nfo->writeState.lockCount == 0) {
+			flushWriteState(nfo->writeState);
+		}
+	}
 }
 
 

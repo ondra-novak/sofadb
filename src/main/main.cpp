@@ -64,10 +64,8 @@ int main(int argc, char **argv) {
 		auto logger = std::make_unique<LevelDBLogger>();
 		cfg.dbopts.info_log = logger.get();
 
-		sofadb::PKeyValueDatabase db = sofadb::leveldb_open(cfg.dbopts,cfg.datapath);
-		sofadb::DatabaseCore core(db);
-		sofadb::SystemDBs sysdbs(core);
-		sofadb::DocumentDB docdb(core);
+		sofadb::PKeyValueDatabase kvdb = sofadb::leveldb_open(cfg.dbopts,cfg.datapath);
+		sofadb::SofaDB db(kvdb);
 
 
 		AsyncProvider asyncProvider = ThreadPoolAsync::create(cfg.server_threads, cfg.server_dispatchers);
@@ -86,7 +84,7 @@ int main(int argc, char **argv) {
 		serverObj.add_ping();
 		serverObj.add_listMethods();
 
-		sofadb::RpcAPI rpcApi(core);
+		sofadb::RpcAPI rpcApi(db);
 		rpcApi.init(serverObj);
 
 		serverObj.start();
