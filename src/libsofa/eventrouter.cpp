@@ -6,6 +6,7 @@
  */
 
 #include <libsofa/eventrouter.h>
+#include <shared/logOutput.h>
 
 namespace sofadb {
 
@@ -58,7 +59,7 @@ EventRouter::WaitHandle EventRouter::waitForEvent(Handle db, SeqNum since, std::
 	if (snmiter == snm.end() || snmiter->second > since) return 0;
 
 	TimePoint tm = TimePoint::clock::now() + std::chrono::milliseconds(timeout);
-	std::size_t tmp = std::chrono::duration_cast<std::chrono::milliseconds>(tm.time_since_epoch()).count()*100;
+	std::size_t tmp = std::chrono::duration_cast<std::chrono::milliseconds>(tm.time_since_epoch()).count();
 	while (omap.find(tmp) != omap.end())
 		tmp++;
 
@@ -112,38 +113,67 @@ EventRouter::~EventRouter() {
 
 
 void EventRouter::reschedule() {
+	using namespace ondra_shared;
+
+	logDebug("reschedule called");
 	if (schevent) {
+		logDebug("reschedule notify all");
 		schevent->notify_all();
 	}
 	if (schexit == nullptr) {
 		worker >> [=] {
 
 			Sync _(lock);
-			if (schevent) return;
+			if (schevent) {
+				logDebug("reschedule duplicate exit");
+				return;
+			}
 
 			auto i = omap.begin();
 
 			TimePoint now = TimePoint::clock::now();
-			std::size_t nmili = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count()*100;
+			std::size_t nmili = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
 			auto e = omap.lower_bound(nmili);
 			while (i != e) {
+				logDebug("sheduler cleanup");
 				worker >> [fn = std::move(i->second.observer)] {
 					fn(false);
 				};
 				oph.erase(OPHKey(i->second.db, i->first));
 				i = omap.erase(i);
 			}
-			if (i == omap.end()) return;
+			if (i == omap.end()) {
+				logDebug("sheduler no work");
+				return;
+			}
+			logDebug("sheduler flush");
+			_.unlock();
+			worker.flush();
+			_.lock();
+			if (schevent) {
+				logDebug("reschedule duplicate exit (2)");
+				return;
+			}
+
 
 			TimePoint until = now+std::chrono::milliseconds(i->first - nmili);
 			std::condition_variable cond;
 			schevent = &cond;
-			cond.wait_until(_,until);
+
+
+			logDebug("sheduler start wait");
+			auto waitres = cond.wait_until(_,until);
+			logDebug("sheduler stop wait");
+
 			schevent = nullptr;
 			if (schexit) {
 				schexit->notify_all();
-				reschedule();
 			}
+			if (waitres == std::cv_status::timeout) {
+					reschedule();
+			}
+			logDebug("sheduler exit");
+
 		};
 	}
 

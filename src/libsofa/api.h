@@ -28,6 +28,7 @@ public:
 	using Filter = std::function<json::Value(const json::Value &)>();
 	using ResultCB = DocumentDB::ResultCB;
 	using WaitHandle = EventRouter::WaitHandle;
+	using Observer = EventRouter::Observer;
 	using GlobalObserver = EventRouter::GlobalObserver;
 	using ObserverHandle = EventRouter::ObserverHandle;
 
@@ -176,55 +177,81 @@ public:
 	 */
 	void purge(Handle h, const std::string_view &docid);
 
-
-	///monitors changes
+	///Reads changes of the database
 	/**
-	 * Function performs monitoring of changes asynchronously
-	 *
-	 * @param h database handle
-	 * @param since sequence number of last seen update.
-	 * @param outputFormat output format
-	 * @param timeout timeout for waiting new change. If set to zero, function returns immediatelly
-	 * @param callback function called when new change is detected. If there is already a change
-	 *                 recorder, the callback is called in current thread. Otherwise, the callback
-	 *                 is registered and monitoring continues asynchronously.
-	 *
-	 *                 The callback function must return true to continue monitoring, or false to
-	 *                 stop monitoring. In case of timeout, function receives null instead of value
-	 *                 as the last result.
-	 *
-	 * @return function returns nullptr when operation has been processed synchronously. Function returns
-	 *    a wait handle if operation will be processed asynchronously. You can use the handle to
-	 *    function cancelMonitor
+	 * @param h handle of database
+	 * @param since id of last known change. To read changes from the beginning, use 0
+	 * @param format specify output format
+	 * @param callback function called for every result
+	 * @retval true all changes reported (or none)
+	 * @retval false canceled during processing
 	 */
-	WaitHandle monitorChanges(Handle h,
-				SeqNum since,
-				OutputFormat outputFormat,
-				std::size_t timeout,
-				ResultCB callback);
+	bool readChanges(Handle h, SeqNum since, bool reversed, OutputFormat format, ResultCB &&callback);
 
 
-
-	///Cancels monitoring
+	///Waits for new changes (one shot)
 	/**
-	 * @param wh handle returned by monitorChanges()
+	 * @param h handle of database
+	 * @param since id of last known change.
+	 * @param timeout_ms timeout in milliseconds
+	 * @param observer function called on change or timeout. The function receives boolean
+	 * 	argument - true, change detected or false, timeout or error
+	 * @return function returns handle which can be useful to cancel asynchronous waiting.
+	 *
+	 *
+	 * @note if there is already change detected, the function returns value, which can be
+	 * checked with operator !. This operator returns true, when no waiting is needed, because
+	 * there are already changes to read.
+	 *
+	 * @code
+	 * WaitHandle wh = api.waitForChanges(h,since,timeout,observer);
+	 * if (!wh) {
+	 *     //read changes now
+	 * } else {
+	 *     //observer will be notified
+	 * }
+	 * @endcode
+	 *
+
+	 */
+	WaitHandle waitForChanges(Handle h, SeqNum since, std::size_t timeout_ms, Observer &&observer);
+
+
+	///Cancels any waiting
+	/**
+	 * @param wh handle value returned by waitForChanges
 	 * @retval true canceled
-	 * @retval false invalid handle (probably already executed)
+	 * @retval false handle is no longer valid, probabily already triggered
 	 */
-	bool cancelMonitor(WaitHandle wh);
+	bool cancelWaitForChanges(WaitHandle wh);
 
-
+	///Register global observer
+	/**
+	 * @param observer observer function
+	 * @return observer handle
+	 *
+	 * @note observer is not one-shot. It is triggered for every change until it is removed
+	 */
 	ObserverHandle registerObserver(GlobalObserver &&observer);
 
+	///Removes global observer
+	/**
+	 * @param handle handle of observer
+	 * @retval true removed
+	 * @retval false not found
+	 *
+	 * @note the observer still can receive events after function returns, there
+	 * can be already stacked notification in the router's queue. There is no
+	 * function to flush that queue
+	 */
 	bool removeObserver(ObserverHandle handle);
 
-	DatabaseCore &getDBCore();
 
 public:
 
-	DatabaseCore &getDatabaseCore();
-	DocumentDB &getDocumentDB();
-	EventRouter &getEventRouter();
+	DatabaseCore &getDBCore();
+	DocumentDB &getDocDB();
+	PEventRouter getEventRouter();
 
 
 protected:

@@ -65,7 +65,7 @@ int main(int argc, char **argv) {
 		cfg.dbopts.info_log = logger.get();
 
 		sofadb::PKeyValueDatabase kvdb = sofadb::leveldb_open(cfg.dbopts,cfg.datapath);
-		sofadb::SofaDB db(kvdb);
+
 
 
 		AsyncProvider asyncProvider = ThreadPoolAsync::create(cfg.server_threads, cfg.server_dispatchers);
@@ -84,7 +84,7 @@ int main(int argc, char **argv) {
 		serverObj.add_ping();
 		serverObj.add_listMethods();
 
-		sofadb::RpcAPI rpcApi(db);
+		sofadb::RpcAPI rpcApi(std::make_shared<sofadb::SofaDB>(kvdb));
 		rpcApi.init(serverObj);
 
 		serverObj.start();

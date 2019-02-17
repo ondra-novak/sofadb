@@ -9,6 +9,7 @@
 #include <imtjson/object.h>
 #include <main/rpcapi.h>
 #include <shared/logOutput.h>
+#include <shared/shared_function.h>
 
 using json::Object;
 
@@ -16,11 +17,15 @@ namespace sofadb {
 
 using namespace json;
 
+RpcAPI::RpcAPI(PSofaDB db):db(db),ntfmap(std::make_shared<NotifyMap>()) {}
+
 void RpcAPI::init(json::RpcServer& server) {
 	server.add("DB.create",this,&RpcAPI::databaseCreate);
 	server.add("DB.delete",this,&RpcAPI::databaseDelete);
 	server.add("DB.list",this,&RpcAPI::databaseList);
 	server.add("DB.rename",this,&RpcAPI::databaseRename);
+	server.add("DB.changes",this,&RpcAPI::databaseChanges);
+	server.add("DB.stopChanges",this,&RpcAPI::databaseStopChanges);
 	server.add("Doc.put",this,&RpcAPI::documentPut);
 	server.add("Doc.get",this,&RpcAPI::documentGet);
 }
@@ -31,8 +36,8 @@ void RpcAPI::databaseCreate(json::RpcRequest req) {
 	if (!req.checkArgs(args)) return req.setArgError();
 	Value a = req.getArgs();
 	String name = a[0].toString();
-	auto h = db.createDB(name.str());
-	if (h == db.invalid_handle) return req.setError(400, "Invalid database name",name);
+	auto h = db->createDB(name.str());
+	if (h == db->invalid_handle) return req.setError(400, "Invalid database name",name);
 	req.setResult(true);
 }
 
@@ -41,7 +46,7 @@ void RpcAPI::databaseDelete(json::RpcRequest req) {
 	if (!req.checkArgs(args)) return req.setArgError();
 	Handle h;
 	if (!arg0ToHandle(req,h)) return;
-	db.deleteDB(h);
+	db->deleteDB(h);
 	req.setResult(true);
 }
 
@@ -49,12 +54,12 @@ void RpcAPI::databaseList(json::RpcRequest req) {
 	static Value args(json::array,{});
 	if (!req.checkArgs(args)) return req.setArgError();
 	Array out;
-	db.listDB([&](std::string_view name, DatabaseCore::Handle h){
+	db->listDB([&](std::string_view name, DatabaseCore::Handle h){
 		Object nfo;
 		nfo.set("name",StrViewA(name))
 			   ("id",h)
-			   ("config",Object("max_logsize",db.getDBCore().getMaxLogSize(h))
-					   	   	   ("max_age",db.getDBCore().getMaxAge(h)));
+			   ("config",Object("max_logsize",db->getDBCore().getMaxLogSize(h))
+					   	   	   ("max_age",db->getDBCore().getMaxAge(h)));
 
 		out.push_back(nfo);
 		return true;
@@ -68,7 +73,7 @@ void RpcAPI::databaseRename(json::RpcRequest req) {
 	StrViewA to = req.getArgs()[1].getString();
 	DatabaseCore::Handle h;
 	if (!arg0ToHandle(req,h)) return;
-	if (!db.renameDB(h,to)) return req.setError(409,"conflict");
+	if (!db->renameDB(h,to)) return req.setError(409,"conflict");
 	req.setResult(true);
 }
 
@@ -79,8 +84,8 @@ bool RpcAPI::arg0ToHandle(json::RpcRequest req, DatabaseCore::Handle &h) {
 		return true;
 	}
 	if (arg0.type() == json::string) {
-		auto hh = db.getDB(arg0.getString());
-		if (hh != db.invalid_handle) {
+		auto hh = db->getDB(arg0.getString());
+		if (hh != db->invalid_handle) {
 			h = hh;
 			return true;
 		}
@@ -101,6 +106,27 @@ static std::size_t getOffset(const Value &v)  {
 	else return 0;
 }
 
+static OutputFormat getOutputFormat(OutputFormat lf, Value v) {
+	Value log = v["log"];
+	Value del = v["deleted"];
+	Value data = v["data"];
+
+	if (log.defined()) {
+		if (log.getBool()) lf = lf | OutputFormat::log;
+		else lf =lf - OutputFormat::log;
+	}
+	if (del.defined()) {
+		if (del.getBool()) lf = lf | OutputFormat::deleted;
+		else lf = lf - OutputFormat::deleted;
+	}
+	if (data.defined()){
+		if (data.getBool()) lf = lf | OutputFormat::data;
+		else lf = lf - OutputFormat::data;
+	}
+	return lf;
+
+}
+
 void RpcAPI::documentGet(json::RpcRequest req) {
 
 	Value args = req.getArgs();
@@ -117,35 +143,20 @@ void RpcAPI::documentGet(json::RpcRequest req) {
 		Value v = args[i];
 		Value res;
 		if (v.type() == json::string) {
-			res = db.get(h, v.getString(), f);
+			res = db->get(h, v.getString(), f);
 		} else if (v.type() == json::object) {
 			Value id = v["id"];
 			Value prefix=v["prefix"];
 			Value start_key=v["start_key"];
 			Value end_key=v["end_key"];
-			OutputFormat lf = f;
+			OutputFormat lf = getOutputFormat(f, v);
 			Value rev = v["rev"];
-			Value log = v["log"];
-			Value del = v["deleted"];
-			Value data = v["data"];
 
-			if (log.defined()) {
-				if (log.getBool()) lf = lf | OutputFormat::log;
-				else lf =lf - OutputFormat::log;
-			}
-			if (del.defined()) {
-				if (del.getBool()) lf = lf | OutputFormat::deleted;
-				else lf = lf - OutputFormat::deleted;
-			}
-			if (data.defined()){
-				if (data.getBool()) lf = lf | OutputFormat::data;
-				else lf = lf - OutputFormat::data;
-			}
 			if (id.defined()) {
 				if (rev.defined()) {
-					res = db.get(h, id.getString(), rev.getString(), lf);
+					res = db->get(h, id.getString(), rev.getString(), lf);
 				} else {
-					res = db.get(h, id.getString(), lf);
+					res = db->get(h, id.getString(), lf);
 				}
 			} else if (prefix.defined() || start_key.defined() || end_key.defined()) {
 				std::size_t limit = getLimit(v);
@@ -153,15 +164,17 @@ void RpcAPI::documentGet(json::RpcRequest req) {
 				if (limit) {
 					std::size_t offset = getOffset(v);
 					auto cb =  [&](const Value &v) {
-						if (offset--) return true;
+						if (offset) {
+							--offset;return true;
+						}
 						l.push_back(v);
 						return 	--limit > 0;
 					};
 					if (prefix.defined()) {
 						bool rev = v["descending"].getBool();
-						db.allDocs(h, lf, prefix.getString(), rev, std::move(cb));
+						db->allDocs(h, lf, prefix.getString(), rev, std::move(cb));
 					} else {
-						db.allDocs(h, lf, start_key.getString(), end_key.getString(), std::move(cb));
+						db->allDocs(h, lf, start_key.getString(), end_key.getString(), std::move(cb));
 					}
 				}
 				res = l;
@@ -201,6 +214,115 @@ PutStatus2Error status2error[13]={
 		{PutStatus::error_log_item_must_be_string,459,"'log' item must be string"}
 };
 
+typedef ondra_shared::shared_function<void(bool)> SharedObserver;
+
+void RpcAPI::databaseChanges(json::RpcRequest req) {
+
+	Value args = req.getArgs();
+
+	DatabaseCore::Handle h;
+	if (!arg0ToHandle(req,h)) return;
+
+	Value cfg = args[1];
+	OutputFormat fmt = getOutputFormat(OutputFormat::metadata_only, cfg);
+	Value vntfname = cfg["notify"];
+	std::size_t timeout = cfg["timeout"].getUInt();
+	std::size_t since = cfg["since"].getUInt();
+	std::size_t offset = getOffset(cfg);
+	std::size_t limit = getLimit(cfg);
+	bool reversed = cfg["descending"].getBool();
+	std::chrono::time_point<std::chrono::steady_clock> now = std::chrono::steady_clock::now();
+	auto abstm = now + std::chrono::milliseconds(timeout);
+	PSofaDB rdb = db;
+	auto nmap = ntfmap;
+
+	String ntfname;
+
+	if (vntfname.defined()) {
+		ntfname = vntfname.toString();
+		if (!nmap->registerNotify(ntfname, 0)) {
+			req.setError(409,"conflict", ntfname);
+			return;
+		}
+
+		SharedObserver observer = [rdb,nmap,ntfname,h,since,reversed,fmt,req,offset,limit,abstm](SharedObserver self, bool not_timeout) mutable {
+			if (not_timeout) {
+				bool failed = false;
+				rdb->readChanges(h, since, reversed, fmt, [&](const Value &x) {
+					since = x["seq"].getUInt();
+					if (offset) {
+						offset--;
+						return true;
+					}
+					else {
+						if (!req.sendNotify(ntfname,x)) {
+							failed = true;
+							return false;
+						}
+						return --limit>0;
+					}
+				});
+
+				std::chrono::time_point<std::chrono::steady_clock> now = std::chrono::steady_clock::now();
+				if (!failed && now < abstm) {
+					std::size_t tm = std::chrono::duration_cast<std::chrono::milliseconds>(abstm-now).count();
+					SofaDB::WaitHandle wh = rdb->waitForChanges(h, since, tm, self);
+					if (!wh) {
+						self(true);
+					} else {
+						if (!nmap->updateNotify(ntfname, wh)) {
+							if (rdb->cancelWaitForChanges(wh)) {
+								req.setError(410,"canceled");
+							}
+						}
+					}
+				} else {
+					self(false);
+				}
+			} else  {
+				req.setResult(Object("seq",since));
+				nmap->stopNotify(ntfname);
+
+			}
+		};
+
+		observer(true);
+	} else {
+		SharedObserver observer = [rdb,h,since,reversed,fmt,req,offset,limit,abstm](SharedObserver self, bool not_timeout) mutable {
+			if (not_timeout) {
+				Array res;
+				rdb->readChanges(h, since, reversed, fmt, [&](const Value &x) {
+					since = x["seq"].getUInt();
+					if (offset) {
+						offset--;
+						return true;
+					}
+					else {
+						res.push_back(x);
+						return --limit>0;
+					}
+				});
+				if (res.empty()) {
+					std::chrono::time_point<std::chrono::steady_clock> now = std::chrono::steady_clock::now();
+					if (now < abstm) {
+						std::size_t tm = std::chrono::duration_cast<std::chrono::milliseconds>(abstm-now).count();
+						SofaDB::WaitHandle wh = rdb->waitForChanges(h, since, tm, self);
+						if (!wh) {
+							self(true);
+						}
+					} else {
+						self(false);
+					}
+				} else {
+					req.setResult(res);
+				}
+			} else  {
+				req.setResult(json::array);
+			}
+		};
+		observer(true);
+	}
+}
 
 Value RpcAPI::statusToError(PutStatus st) {
 
@@ -225,7 +347,7 @@ void RpcAPI::documentPut(json::RpcRequest req) {
 
 		Value doc = args[i];
 		String newrev;
-		PutStatus st = db.put(h,doc,newrev);
+		PutStatus st = db->put(h,doc,newrev);
 		if (st == PutStatus::stored) {
 			result.push_back(Object("id",doc["id"])
 								   ("rev",newrev));
@@ -241,5 +363,38 @@ void RpcAPI::documentPut(json::RpcRequest req) {
 	req.setResult(result);
 }
 
+bool RpcAPI::NotifyMap::registerNotify(String notifyName, SofaDB::WaitHandle waitHandle) {
+	std::lock_guard<std::mutex> _(notifyLock);
+	auto iter = notifyMap.find(notifyName);
+	if (iter != notifyMap.end()) return false;
+	notifyMap.insert(std::pair(notifyName,waitHandle));
+	return true;
+
+}
+
+bool RpcAPI::NotifyMap::updateNotify(json::String notifyName,SofaDB::WaitHandle waitHandle) {
+	std::lock_guard<std::mutex> _(notifyLock);
+	auto iter = notifyMap.find(notifyName);
+	if (iter == notifyMap.end()) return false;
+	iter->second = waitHandle;
+	return true;
+}
+
+void RpcAPI::databaseStopChanges(json::RpcRequest req) {
+	String id = req.getArgs()[0].toString();
+	SofaDB::WaitHandle wh = ntfmap->stopNotify(id);
+	if (wh == 0) req.setError(404,"not_found",id);
+	db->cancelWaitForChanges(wh);
+	req.setResult(true);
+}
+
+SofaDB::WaitHandle RpcAPI::NotifyMap::stopNotify(json::String notifyName) {
+	std::lock_guard<std::mutex> _(notifyLock);
+	auto iter = notifyMap.find(notifyName);
+	if (iter == notifyMap.end()) return 0;
+	SofaDB::WaitHandle wh = iter->second;
+	notifyMap.erase(iter);
+	return wh;
+}
 } /* namespace sofadb */
 

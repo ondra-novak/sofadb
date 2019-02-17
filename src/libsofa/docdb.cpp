@@ -340,5 +340,13 @@ bool DocumentDB::listDocs(Handle h, const std::string_view& start,
 	return core.enumDocs(h,start,end,createJsonSerializer(format,callback));
 }
 
+bool DocumentDB::listChanges(Handle h, const SeqNum &since, bool reversed, OutputFormat format, ResultCB &&cb) {
+	return core.readChanges(h, since, reversed,
+			[&](const DocID& docid, const SeqNum &) {
+		Value v = this->get(h,docid,format);
+		return cb(v);
+	});
+}
+
 
 } /* namespace sofadb */

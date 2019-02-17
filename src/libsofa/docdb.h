@@ -126,6 +126,7 @@ public:
 
 	bool listDocs(Handle h, const std::string_view &start, const std::string_view &end, OutputFormat format, ResultCB &&callback);
 
+	bool listChanges(Handle h, const SeqNum &since, bool reversed, OutputFormat format, ResultCB &&cb);
 
 	static std::uint64_t getTimestamp();
 

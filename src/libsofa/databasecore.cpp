@@ -727,7 +727,14 @@ bool DatabaseCore::rename(Handle h, const std::string_view& newname) {
 }
 
 void DatabaseCore::setObserver(Observer&& observer) {
+	std::lock_guard<std::recursive_mutex> _(lock);
 	this->observer = std::move(observer);
+	Handle h = 0;
+	for (auto &&c: dblist) {
+		if (c != nullptr) this->observer(event_create,h,c->nextSeqNum-1);
+		++h;
+	}
+
 }
 
 

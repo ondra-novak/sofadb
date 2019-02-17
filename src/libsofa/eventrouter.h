@@ -28,6 +28,7 @@ namespace sofadb {
 using ondra_shared::Worker;
 using ondra_shared::WaitableEvent;
 
+
 ///Routes database events to various observers
 /** It is executed in separate thread(s). There can be many observers for many databases
  * Every observer is registered only for one-shot. When event is emited, all observers

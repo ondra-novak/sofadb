@@ -107,30 +107,36 @@ void SofaDB::purge(Handle h, const std::string_view& docid) {
 	//docdb.purge(docid);
 }
 
-SofaDB::WaitHandle SofaDB::monitorChanges(Handle h, SeqNum since, OutputFormat outputFormat, std::size_t timeout, ResultCB  callback) {
-	//eventRouter->waitForEvent(db,since,[])
-}
-
-bool SofaDB::cancelMonitor(WaitHandle wh) {
-}
-
 SofaDB::ObserverHandle SofaDB::registerObserver(GlobalObserver&& observer) {
+	return eventRouter->registerObserver(std::move(observer));
 }
 
 bool SofaDB::removeObserver(ObserverHandle handle) {
+	return eventRouter->removeObserver(handle);
 }
 
-DatabaseCore& SofaDB::getDatabaseCore() {
-}
-
-DocumentDB& SofaDB::getDocumentDB() {
+DocumentDB& SofaDB::getDocDB() {
+	return docdb;
 }
 
 DatabaseCore& SofaDB::getDBCore() {
 	return dbcore;
 }
 
-EventRouter& SofaDB::getEventRouter() {
+bool SofaDB::readChanges(Handle h, SeqNum since,bool reversed, OutputFormat format, ResultCB&& callback) {
+	return docdb.listChanges(h, since, reversed, format, std::move(callback));
+}
+
+SofaDB::WaitHandle SofaDB::waitForChanges(Handle h, SeqNum since, std::size_t timeout_ms, Observer&& observer) {
+	return eventRouter->waitForEvent(h, since,timeout_ms,std::move(observer));
+}
+
+bool SofaDB::cancelWaitForChanges(WaitHandle wh) {
+	return eventRouter->cancelWait(wh);
+}
+
+PEventRouter SofaDB::getEventRouter() {
+	return eventRouter;
 }
 
 }
