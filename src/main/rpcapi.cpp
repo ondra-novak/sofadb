@@ -23,7 +23,6 @@ void RpcAPI::init(json::RpcServer& server) {
 	server.add("DB.rename",this,&RpcAPI::databaseRename);
 	server.add("Doc.put",this,&RpcAPI::documentPut);
 	server.add("Doc.get",this,&RpcAPI::documentGet);
-	server.add("Doc.list",this,&RpcAPI::documentList);
 }
 
 void RpcAPI::databaseCreate(json::RpcRequest req) {
@@ -90,6 +89,18 @@ bool RpcAPI::arg0ToHandle(json::RpcRequest req, DatabaseCore::Handle &h) {
 	return false;
 }
 
+static std::size_t getLimit(const Value &v)  {
+	Value x = v["limit"];
+	if (x.defined()) return v.getUInt();
+	else return static_cast<std::size_t>(-1);
+}
+
+static std::size_t getOffset(const Value &v)  {
+	Value x = v["skip"];
+	if (x.defined()) return v.getUInt();
+	else return 0;
+}
+
 void RpcAPI::documentGet(json::RpcRequest req) {
 
 	Value args = req.getArgs();
@@ -109,10 +120,14 @@ void RpcAPI::documentGet(json::RpcRequest req) {
 			res = db.get(h, v.getString(), f);
 		} else if (v.type() == json::object) {
 			Value id = v["id"];
+			Value prefix=v["prefix"];
+			Value start_key=v["start_key"];
+			Value end_key=v["end_key"];
 			OutputFormat lf = f;
 			Value rev = v["rev"];
 			Value log = v["log"];
 			Value del = v["deleted"];
+			Value data = v["data"];
 
 			if (log.defined()) {
 				if (log.getBool()) lf = lf | OutputFormat::log;
@@ -122,12 +137,34 @@ void RpcAPI::documentGet(json::RpcRequest req) {
 				if (del.getBool()) lf = lf | OutputFormat::deleted;
 				else lf = lf - OutputFormat::deleted;
 			}
+			if (data.defined()){
+				if (data.getBool()) lf = lf | OutputFormat::data;
+				else lf = lf - OutputFormat::data;
+			}
 			if (id.defined()) {
 				if (rev.defined()) {
 					res = db.get(h, id.getString(), rev.getString(), lf);
 				} else {
 					res = db.get(h, id.getString(), lf);
 				}
+			} else if (prefix.defined() || start_key.defined() || end_key.defined()) {
+				std::size_t limit = getLimit(v);
+				Array l;
+				if (limit) {
+					std::size_t offset = getOffset(v);
+					auto cb =  [&](const Value &v) {
+						if (offset--) return true;
+						l.push_back(v);
+						return 	--limit > 0;
+					};
+					if (prefix.defined()) {
+						bool rev = v["descending"].getBool();
+						db.allDocs(h, lf, prefix.getString(), rev, std::move(cb));
+					} else {
+						db.allDocs(h, lf, start_key.getString(), end_key.getString(), std::move(cb));
+					}
+				}
+				res = l;
 			} else {
 				f = lf;
 			}
@@ -202,9 +239,6 @@ void RpcAPI::documentPut(json::RpcRequest req) {
 
 	}
 	req.setResult(result);
-}
-
-void RpcAPI::documentList(json::RpcRequest req) {
 }
 
 } /* namespace sofadb */

@@ -50,19 +50,23 @@ bool SofaDB::renameDB(Handle h, const std::string_view& name) {
 }
 
 bool SofaDB::allDocs(Handle db, OutputFormat outputFormat, ResultCB&& cb) {
+	return docdb.listDocs(db, std::string_view(),false,outputFormat,std::move(cb));
 }
 
 bool SofaDB::allDocs(Handle db, OutputFormat outputFormat,
 		const std::string_view& prefix, ResultCB&& cb) {
+	return docdb.listDocs(db, prefix,false,outputFormat,std::move(cb));
 }
 
 bool SofaDB::allDocs(Handle db, OutputFormat outputFormat,
 		const std::string_view& prefix, bool reversed, ResultCB&& cb) {
+	return docdb.listDocs(db, prefix,reversed,outputFormat,std::move(cb));
 }
 
 bool SofaDB::allDocs(Handle db, OutputFormat outputFormat,
 		const std::string_view& start_key, const std::string_view& end_key,
 		ResultCB&& cb) {
+	return docdb.listDocs(db, start_key, end_key,outputFormat,std::move(cb));
 }
 
 PutStatus SofaDB::put(Handle db, const json::Value& doc, json::String &newrev) {
