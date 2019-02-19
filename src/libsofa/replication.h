@@ -49,13 +49,8 @@ class IReplicationProtocol {
 public:
 
 
-	struct Manifest {
-		SeqNum seqNum;
-		std::string_view docid;
-		std::basic_string_view<std::string_view> revids;
-	};
 
-	using Manifest = std::basic_string_view<Manifest>;
+	using Manifest = std::basic_string_view<json::Value>;
 
 
 
@@ -76,7 +71,7 @@ public:
 	/**
 	 * @param status result of receiving document
 	 */
-	using SendDocCallback = std::function<void(Status )>;
+	using SendDocCallback = std::function<void(PutStatus )>;
 
 
 	///Request manifest from other side
@@ -89,11 +84,12 @@ public:
 	 *    be restarted from last change
 	 * @param timeout specify timeout while waiting for new change, this applies when databases
 	 * 	are in sync and there is process providing live replication. This allows to request to
-	 * 	block for specified timeout or until the change is detected
+	 * 	block for specified timeout or until the change is detected. There can be only one
+	 * 	such request at time. If other is started, parameter timeout is ignored
 	 * @param cb callback is called with result. Callback can be called synchronously
 	 * or asynchronously. Prepare for both possibilites
 	 */
-	virtual void requestManifest(SeqNum since, std::size_t limit, std::size_t timeout, ChangeCallback &&cb) = 0;
+	virtual void requestManifest(SeqNum since, std::size_t limit, std::size_t timeout, ManifestCallback &&cb) = 0;
 	///Send my changes to the other database
 	/** this is used to send my database to the other node while other node is still in server
 	 * mode.
@@ -120,7 +116,8 @@ public:
 	virtual void sendDoc(const json::Value &doc, bool history, SendDocCallback &&cb) = 0;
 
 
-
+	///stops waiting for manifest in live replication
+	virtual void stopRequestManifest() = 0;
 
 
 };

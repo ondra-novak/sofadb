@@ -466,9 +466,9 @@ SeqNum DatabaseCore::readChanges(Handle h, SeqNum from, bool reversed,
 	while (iter.getNext()) {
 		extract_value(iter->second,docId);
 		extract_from_key(iter->first, skip, seq);
-		if (!fn(docId, from)) return from;
+		if (!fn(docId, seq)) return seq;
 	}
-	return from;
+	return seq;
 }
 
 bool DatabaseCore::viewLookup(ViewID viewID, const std::string_view& prefix,

@@ -340,12 +340,35 @@ bool DocumentDB::listDocs(Handle h, const std::string_view& start,
 	return core.enumDocs(h,start,end,createJsonSerializer(format,callback));
 }
 
-bool DocumentDB::listChanges(Handle h, const SeqNum &since, bool reversed, OutputFormat format, ResultCB &&cb) {
-	return core.readChanges(h, since, reversed,
-			[&](const DocID& docid, const SeqNum &) {
-		Value v = this->get(h,docid,format);
+SeqNum DocumentDB::readChanges(Handle h, const SeqNum &since, bool reversed, OutputFormat format,  ResultCB &&cb) {
+	std::string tmp;
+	return core.readChanges(h, since, reversed, [&](const DocID& docid, const SeqNum &sq) {
+		DatabaseCore::RawDocument rawdoc;
+		if (!core.findDoc(h,docid, rawdoc, tmp)) return true;
+		Value v = parseDocument(rawdoc, format | OutputFormat::deleted);
 		return cb(v);
 	});
+
+}
+
+SeqNum DocumentDB::readChanges(Handle h, const SeqNum &since, bool reversed, OutputFormat format, DocFilter &&flt, ResultCB &&cb) {
+	if (flt == nullptr) return readChanges(h,since,reversed,format,std::move(cb));
+	std::string tmp;
+	return core.readChanges(h, since, reversed,
+				[&](const DocID& docid, const SeqNum &sq) {
+		DatabaseCore::RawDocument rawdoc;
+		if (!core.findDoc(h,docid, rawdoc, tmp)) return true;
+		Value v = flt(parseDocument(rawdoc, format | OutputFormat::deleted | OutputFormat::data | OutputFormat::log));
+		if (!v.defined()) return true;
+		if (format != OutputFormat::data) {
+			v = v.replace("data",Value());
+		}
+		if (format != OutputFormat::log) {
+			v = v.replace("log",Value());
+		}
+		return cb(v);
+	});
+
 }
 
 

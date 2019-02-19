@@ -13,12 +13,14 @@
 #include "databasecore.h"
 #include "docdb.h"
 #include "eventrouter.h"
+#include "replication.h"
+#include "filter.h"
 
 namespace sofadb {
 
 
 ///This class contains end-user API to control content of SofaDB
-class SofaDB {
+class SofaDB{
 public:
 
 	SofaDB(PKeyValueDatabase kvdatabase);
@@ -186,7 +188,17 @@ public:
 	 * @retval true all changes reported (or none)
 	 * @retval false canceled during processing
 	 */
-	bool readChanges(Handle h, SeqNum since, bool reversed, OutputFormat format, ResultCB &&callback);
+	SeqNum readChanges(Handle h, SeqNum since, bool reversed, OutputFormat format, ResultCB &&callback);
+	///Reads changes of the database
+	/**
+	 * @param h handle of database
+	 * @param since id of last known change. To read changes from the beginning, use 0
+	 * @param format specify output format
+	 * @param callback function called for every result
+	 * @retval true all changes reported (or none)
+	 * @retval false canceled during processing
+	 */
+	SeqNum readChanges(Handle h, SeqNum since, bool reversed, OutputFormat format, DocFilter &&flt, ResultCB &&callback);
 
 
 	///Waits for new changes (one shot)
@@ -247,6 +259,25 @@ public:
 	bool removeObserver(ObserverHandle handle);
 
 
+	class ReplicationServer:public IReplicationProtocol {
+	public:
+		ReplicationServer(Handle h, DocumentDB &docdb, PEventRouter eventRouter);
+		virtual void requestManifest(SeqNum since, std::size_t limit, std::size_t timeout, ManifestCallback &&cb);
+		virtual void sendMyManifest(const Manifest &manifest, DocRequestCallback &&cb);
+		virtual void requestDoc(const std::string_view &docid, const std::string_view &revid, DocCallback &&cb);
+		virtual void sendDoc(const json::Value &doc, bool history, SendDocCallback &&cb);
+		virtual void stopRequestManifest();
+	protected:
+		Handle h;
+		DocumentDB &docdb;
+		PEventRouter eventRouter;
+		WaitHandle wh = 0;
+	};
+
+
+
+	ReplicationServer createReplicationServer(Handle h);
+
 public:
 
 	DatabaseCore &getDBCore();
@@ -262,6 +293,7 @@ protected:
 	PEventRouter eventRouter;
 
 };
+
 
 
 

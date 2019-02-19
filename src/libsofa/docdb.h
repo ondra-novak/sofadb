@@ -12,6 +12,7 @@
 #include <imtjson/value.h>
 #include "types.h"
 #include "databasecore.h"
+#include "filter.h"
 
 namespace sofadb {
 
@@ -74,9 +75,12 @@ inline bool operator != (OutputFormat a, OutputFormat b) {
 	return !(a == b);
 }
 
+
 class DocumentDB {
 public:
 	DocumentDB(DatabaseCore &core);
+
+
 
 
 
@@ -126,7 +130,33 @@ public:
 
 	bool listDocs(Handle h, const std::string_view &start, const std::string_view &end, OutputFormat format, ResultCB &&callback);
 
-	bool listChanges(Handle h, const SeqNum &since, bool reversed, OutputFormat format, ResultCB &&cb);
+	///read changes
+	/**
+	 * @param h handle to database
+	 * @param since sequence number where to start (last read sequence number or zero)
+	 * @param reversed set true if you need reversed list
+	 * @param format output format. It always includes deleted items
+	 * @param cb callback function. Function must return true to continue or false to stop reading
+	 * @return last sequence number. If zero is returned, then invalid handle or database is empty. If reversed is in efect, function returns lowest seqnum processed
+	 *
+	 */
+	SeqNum readChanges(Handle h, const SeqNum &since, bool reversed, OutputFormat format, ResultCB &&cb);
+
+	///read changes with filter
+	/**
+	 * @param h handle to database
+	 * @param since sequence number where to start (last read sequence number or zero)
+	 * @param reversed set true if you need reversed list
+	 * @param format output format. It always includes deleted items
+	 * @param flt user defined filter function. The function accepts Value which contains whole document.
+	 * 			It also contains data section even if the data are not specified in output format. However
+	 * 			it doesn't contain log section unless the log section is requested explicitly
+	 * 			Function can return whole document or undefined to filter document out.
+	 * 			The function can also modify the document.
+	 * @param cb callback function. . Function must return true to continue or false to stop reading
+	 * @return last sequence number. If zero is returned, then invalid handle or database is empty. If reversed is in efect, function returns lowest seqnum processed
+	 */
+	SeqNum readChanges(Handle h, const SeqNum &since, bool reversed, OutputFormat format, DocFilter &&flt, ResultCB &&cb);
 
 	static std::uint64_t getTimestamp();
 

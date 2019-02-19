@@ -216,6 +216,7 @@ PutStatus2Error status2error[13]={
 
 typedef ondra_shared::shared_function<void(bool)> SharedObserver;
 
+
 void RpcAPI::databaseChanges(json::RpcRequest req) {
 
 	Value args = req.getArgs();
@@ -235,6 +236,8 @@ void RpcAPI::databaseChanges(json::RpcRequest req) {
 	auto abstm = now + std::chrono::milliseconds(timeout);
 	PSofaDB rdb = db;
 	auto nmap = ntfmap;
+	Value filter = cfg["filter"];
+	DocFilter flt = createFilter(filter);
 
 	String ntfname;
 
@@ -245,11 +248,10 @@ void RpcAPI::databaseChanges(json::RpcRequest req) {
 			return;
 		}
 
-		SharedObserver observer = [rdb,nmap,ntfname,h,since,reversed,fmt,req,offset,limit,abstm](SharedObserver self, bool not_timeout) mutable {
+		SharedObserver observer = [rdb,nmap,ntfname,h,since,reversed,fmt,flt,req,offset,limit,abstm](SharedObserver self, bool not_timeout) mutable {
 			if (not_timeout) {
 				bool failed = false;
-				rdb->readChanges(h, since, reversed, fmt, [&](const Value &x) {
-					since = x["seq"].getUInt();
+				since = rdb->readChanges(h, since, reversed, fmt, std::move(flt), [&](const Value &x) {
 					if (offset) {
 						offset--;
 						return true;
@@ -288,11 +290,10 @@ void RpcAPI::databaseChanges(json::RpcRequest req) {
 
 		observer(true);
 	} else {
-		SharedObserver observer = [rdb,h,since,reversed,fmt,req,offset,limit,abstm](SharedObserver self, bool not_timeout) mutable {
+		SharedObserver observer = [rdb,h,since,reversed,fmt,flt,req,offset,limit,abstm](SharedObserver self, bool not_timeout) mutable {
 			if (not_timeout) {
 				Array res;
-				rdb->readChanges(h, since, reversed, fmt, [&](const Value &x) {
-					since = x["seq"].getUInt();
+				since = rdb->readChanges(h, since, reversed, fmt, std::move(flt), [&](const Value &x) {
 					if (offset) {
 						offset--;
 						return true;
