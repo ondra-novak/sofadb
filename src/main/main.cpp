@@ -17,6 +17,7 @@
 #include "../libsofa/docdb.h"
 #include "../libsofa/systemdbs.h"
 #include "rpcapi.h"
+#include "debugapi.h"
 
 using doxyhub::ServerConfig;
 using ondra_shared::LogLevel;
@@ -86,6 +87,8 @@ int main(int argc, char **argv) {
 
 		sofadb::RpcAPI rpcApi(std::make_shared<sofadb::SofaDB>(kvdb));
 		rpcApi.init(serverObj);
+		sofadb::DebugAPI debugApi(kvdb);
+		debugApi.init(serverObj);
 
 		serverObj.start();
 

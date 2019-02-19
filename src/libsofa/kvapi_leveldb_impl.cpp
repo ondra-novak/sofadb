@@ -117,7 +117,7 @@ void LevelDBChangeset::erasePrefix(const std::string_view& prefix) {
 	if (!st.ok()) throw LevelDBException(st);
 	while(iter->Valid()) {
 		auto k = iter->key();
-		if (slice2str(k).substr(len) != prefix) break;
+		if (slice2str(k).substr(0,len) != prefix) break;
 		batch.Delete(k);
 		iter->Next();
 		st = iter->status();
