@@ -28,6 +28,7 @@ public:
 	void databaseList(json::RpcRequest req);
 	void databaseRename(json::RpcRequest req);
 	void databaseChanges(json::RpcRequest req);
+	void databaseSetConfig(json::RpcRequest req);
 	void databaseStopChanges(json::RpcRequest req);
 	void documentGet(json::RpcRequest req);
 	void documentPut(json::RpcRequest req);

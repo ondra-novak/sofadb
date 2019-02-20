@@ -40,6 +40,51 @@ public:
 	typedef std::function<void(ObserverEvent, Handle, SeqNum)> Observer;
 	typedef std::set<std::string> KeySet;
 
+
+	struct DBConfig {
+		///Size of log
+		/** Log contains list of previous revision numbers allowing to easily connect
+		 * new revision to an old revision without need to have all intermediate revisions. If log
+		 * is small, that too many revision created outside this node will not be able replicated back, because
+		 * connection to current revision will be lost (log overflows).
+		 *
+		 * Higher number costs performance and space. Each log item occupies extra 8 bytes of the document. These
+		 * extra bytes must be also transfered during any lookup
+		 */
+		std::size_t logsize = 100;
+		///Contains max age of stored revision. Older revisions are deleted. Value is in milliseconds
+		/** Note that maintenance task will delete old revisions only when new revision is stored. Otherwise
+		 * older revision survives much longer
+		 */
+		std::size_t history_max_age = 24*60*60*1000L; //30days
+		///Specifies minimum count of older revisions stored as full copy
+		/** Default value is 2, so total 3 revisions are stored. One current and two historical. They are
+		 * kept stored even if they are older than history_max_age
+		 */
+		std::size_t history_min_count = 2; //keep 2 older revisions
+		///specifies max limit of total stored revisions. This number must be above or equal to history_min_count
+		/** This affects, how old revision will be removed
+		 * First, all revisions above history_min_count and older than history_max_age are deleted.
+		 * Second, if count of remaining old items is above this number, then some of revisions from now to max_age
+		 * are also removed. Only immediate revision and oldest revision persists. So that means, that this
+		 * number can't be less than 2 otherwise it wraps to 2.
+		 *
+		 * This number reduces count of historical revisions without loosing ability to perform 3-way merge
+		 * with any conflicted revision which immediate parent revision is no longer available.
+		 */
+		std::size_t history_max_count = 3; //keep max 2 older revisions
+		///Definex maximum count of old revisions for deleted documents
+		/** Default value 0 means, that no older revision is stored, just tombstone, everything older is deleted. T
+		 * This doesn't affect merge ability because deleted document is always winner unless there is update
+		 * directly refers to deleted document's recent revision.
+		 *
+		 * Value 1 left one older revision that allows to do undelete operation and restore old data. Other values
+		 * can make history larger, however settings for not-deleted document is still in effect also for
+		 * deleted documents.
+		 */
+		std::size_t history_max_deleted = 0;
+	};
+
 private:
 	struct WriteState {
 		PChangeset curBatch;
@@ -64,8 +109,6 @@ private:
 	struct Info {
 		std::string name;
 		SeqNum nextSeqNum = 1;
-		std::size_t logsize=100;
-		std::size_t age=30*24*60*60*1000L;
 		WriteState writeState;
 		ViewStateMap viewState;
 		ViewNameToID viewNameToID;
@@ -73,6 +116,8 @@ private:
 		std::string key,key2;
 		///temporary buffer for value
 		std::string value,value2;
+
+		DBConfig cfg;
 
 		std::recursive_mutex lock;
 	};
@@ -419,10 +464,6 @@ public:
 	bool deleteView(Handle h, ViewID view);
 
 
-	std::size_t getMaxLogSize(Handle h);
-	void setMaxLogSize(Handle h, std::size_t sz);
-	std::size_t getMaxAge(Handle h);
-	void setMaxAge(Handle h, std::size_t sz);
 
 	///Sets observer
 	/** There can be one observer which is called on every update in any databse.
@@ -442,6 +483,17 @@ public:
 	 * removing the database from the disk
 	 */
 	void destroy();
+
+
+	bool getConfig(Handle h, DBConfig &cfg) ;
+
+	bool setConfig(Handle h, const DBConfig &cfg);
+
+	std::size_t getMaxLogSize(Handle h) ;
+
+
+	void cleanHistory(Handle h, const std::string_view &docid);
+
 
 protected:
 
@@ -476,6 +528,9 @@ protected:
 	template<typename T>
 	void storeProp(PInfo nfo, Handle h, std::string_view name, const T &prop);
 
+
+	bool loadDBConfig(Handle h, DBConfig &cfg);
+	bool storeDBConfig(Handle h, const DBConfig &cfg);
 
 };
 

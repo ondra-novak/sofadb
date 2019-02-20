@@ -61,28 +61,12 @@ void DatabaseCore::loadDBs() {
 			nfo->nextSeqNum = 1;
 		}
 
+		loadDBConfig(c.second,nfo->cfg);
 
-		key_dbconfig(nfo->key,c.second);
-		Iterator iter(maindb->findRange(nfo->key,false));
-		while (iter.getNext()) {
-			std::string_view prop;
-			extract_from_key(iter->first, nfo->key.length(), prop);
-			if (prop == "logsize") {
-				extract_value(iter->second,nfo->logsize);
-			} else 	if (prop == "historysize") {
-				extract_value(iter->second,nfo->age);
-			}
-
-		}
 		dblist[c.second] = std::move(nfo);
 	}
 
 
-}
-
-std::size_t DatabaseCore::getMaxLogSize(Handle h) {
-	PInfo nfo = getDatabaseState(h);
-	return nfo->logsize;
 }
 
 template<typename T>
@@ -94,22 +78,6 @@ void DatabaseCore::storeProp(PInfo nfo, Handle h, std::string_view name, const T
 	endBatch(nfo);
 }
 
-void DatabaseCore::setMaxLogSize(Handle h, std::size_t sz) {
-	PInfo nfo = getDatabaseState(h);
-	nfo->logsize = sz;
-	storeProp(nfo, h, "logsize", sz);
-}
-
-std::size_t DatabaseCore::getMaxAge(Handle h) {
-	PInfo nfo = getDatabaseState(h);
-	return nfo->age;
-}
-
-void DatabaseCore::setMaxAge(Handle h, std::size_t sz) {
-	PInfo nfo = getDatabaseState(h);
-	nfo->age = sz;
-	storeProp(nfo, h, "historysize", sz);
-}
 
 void DatabaseCore::loadViews() {
 
@@ -734,6 +702,141 @@ void DatabaseCore::setObserver(Observer&& observer) {
 		if (c != nullptr) this->observer(event_create,h,c->nextSeqNum-1);
 		++h;
 	}
+}
+
+void json2dbconfig(json::Value data, DatabaseCore::DBConfig &cfg) {
+	json::Value v = data["history_max_age"];
+	if (v.defined()) cfg.history_max_age = v.getUInt();
+	v = data["history_max_count"];
+	if (v.defined()) cfg.history_max_count = v.getUInt();
+	v = data["history_max_deleted"];
+	if (v.defined()) cfg.history_max_deleted = v.getUInt();
+	v = data["history_min_count"];
+	if (v.defined()) cfg.history_min_count = v.getUInt();
+	v = data["logsize"];
+	if (v.defined()) cfg.logsize = v.getUInt();
+}
+
+bool DatabaseCore::loadDBConfig(Handle h, DBConfig &cfg) {
+	std::string key,value;
+	key_dbconfig(key,h,"config");
+	if (maindb->lookup(key,value)) {
+		std::string_view src(value);
+		json::Value data = json::Value::parseBinary(JsonSource(src),json::utf8encoding);
+		json2dbconfig(data,cfg);
+		return true;
+	} else {
+		return false;
+	}
+}
+
+json::Value dbconfig2json(const DatabaseCore::DBConfig &cfg) {
+	json::Object obj;
+	obj.set("history_max_age", cfg.history_max_age)
+		   ("history_max_count",cfg.history_max_count)
+		   ("history_max_deleted",cfg.history_max_deleted)
+		   ("history_min_count",cfg.history_min_count)
+		   ("logsize",cfg.logsize);
+
+	return obj;
+}
+
+bool DatabaseCore::storeDBConfig(Handle h, const DBConfig &cfg) {
+
+
+	PInfo dbf = getDatabaseState(h);
+	if (dbf == nullptr) return false;
+
+	json::Value data = dbconfig2json(cfg);
+	dbf->value.clear();
+	data.serializeBinary(JsonTarget(dbf->value), json::compressKeys);
+	key_dbconfig(dbf->key,h,"config");
+	PChangeset chs = beginBatch(dbf);
+	chs->put(dbf->key, dbf->value);
+	dbf->cfg = cfg;
+	endBatch(dbf);
+	return true;
+}
+
+bool DatabaseCore::getConfig(Handle h, DBConfig &cfg)  {
+	PInfo dbf = getDatabaseState(h);
+	if (dbf == nullptr) return false;
+	cfg = dbf->cfg;
+	return true;
+}
+
+std::size_t DatabaseCore::getMaxLogSize(Handle h)  {
+	PInfo dbf = getDatabaseState(h);
+	if (dbf == nullptr) return 0;
+	return dbf->cfg.logsize;
+}
+
+bool DatabaseCore::setConfig(Handle h, const DBConfig &cfg) {
+	return storeDBConfig(h, cfg);
+}
+
+void DatabaseCore::cleanHistory(Handle h, const std::string_view &docid) {
+	RawDocument topdoc;
+	std::string key;
+	if (!findDoc(h,docid,topdoc, key)) return;
+
+	key_doc_revs(key, h, docid);
+	Iterator iter(maindb->findRange(key));
+
+
+	std::vector<std::string> docdata;
+	std::vector<RawDocument> rawdocs;
+	std::vector<RevID> deldocs;;
+
+	while (iter.getNext()) {
+		docdata.push_back(iter->second);
+	}
+	rawdocs.reserve(docdata.size());
+	for (auto &&c: docdata) {
+		RawDocument doc;
+		value2document(c,doc);
+		rawdocs.push_back(doc);
+	}
+
+	auto sortfn = [](const RawDocument &a, const RawDocument &b) {
+		return a.timestamp > b.timestamp;
+	};
+
+	DBConfig cfg;
+	getConfig(h,cfg);
+
+	std::sort(rawdocs.begin(), rawdocs.end(),sortfn);
+	std::size_t now = std::chrono::duration_cast< std::chrono::milliseconds >(std::chrono::system_clock::now().time_since_epoch()).count();
+	std::size_t old = now-cfg.history_max_age;
+	while (rawdocs.size() > cfg.history_min_count && !rawdocs.empty() && rawdocs.back().timestamp < old) {
+		deldocs.push_back(rawdocs.back().revision);
+		rawdocs.pop_back();
+	}
+
+	if (topdoc.deleted) {
+		while (rawdocs.size() > cfg.history_max_deleted) {
+			deldocs.push_back(rawdocs.back().revision);
+			rawdocs.pop_back();
+		}
+	}
+
+	if (rawdocs.size() > cfg.history_max_count) {
+		Timestamp first = rawdocs[0].timestamp;
+		Timestamp last = rawdocs.back().timestamp;
+		rawdocs.erase(rawdocs.end());
+		rawdocs.pop_back();
+		std::size_t cnt = cfg.history_max_count;
+		if (cnt < 2) cnt = 0; else cnt = cnt - 2;
+		if (cnt == 0) for(auto &&c: rawdocs) deldocs.push_back(c.revision);
+		else {
+			Timestamp block = (first - last) / cnt;
+
+		}
+	}
+
+
+
+
 
 }
 

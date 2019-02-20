@@ -23,6 +23,7 @@ void RpcAPI::init(json::RpcServer& server) {
 	server.add("DB.create",this,&RpcAPI::databaseCreate);
 	server.add("DB.delete",this,&RpcAPI::databaseDelete);
 	server.add("DB.list",this,&RpcAPI::databaseList);
+	server.add("DB.setConfig",this,&RpcAPI::databaseSetConfig);
 	server.add("DB.rename",this,&RpcAPI::databaseRename);
 	server.add("DB.changes",this,&RpcAPI::databaseChanges);
 	server.add("DB.stopChanges",this,&RpcAPI::databaseStopChanges);
@@ -42,7 +43,7 @@ void RpcAPI::databaseCreate(json::RpcRequest req) {
 }
 
 void RpcAPI::databaseDelete(json::RpcRequest req) {
-	static Value args(json::array,{{"string","unsigned"}});
+	static Value args(json::array,{{"string","integer"}});
 	if (!req.checkArgs(args)) return req.setArgError();
 	Handle h;
 	if (!arg0ToHandle(req,h)) return;
@@ -50,16 +51,35 @@ void RpcAPI::databaseDelete(json::RpcRequest req) {
 	req.setResult(true);
 }
 
+json::Value dbconfig2json(const DatabaseCore::DBConfig &cfg);
+void json2dbconfig(json::Value data, DatabaseCore::DBConfig &cfg);
+
+void RpcAPI::databaseSetConfig(json::RpcRequest req) {
+	static Value form({{"string","integer"}, Object("%","any")});
+	if (!req.checkArgs(form)) return req.setArgError();
+	Value args = req.getArgs();
+	Handle h;
+	if (!arg0ToHandle(req,h)) return;
+	DatabaseCore::DBConfig cfg;
+	db->getDBCore().getConfig(h, cfg);
+	json2dbconfig(args[1],cfg);
+	db->getDBCore().setConfig(h, cfg);
+	req.setResult(true);
+
+}
+
+
 void RpcAPI::databaseList(json::RpcRequest req) {
 	static Value args(json::array,{});
 	if (!req.checkArgs(args)) return req.setArgError();
 	Array out;
 	db->listDB([&](std::string_view name, DatabaseCore::Handle h){
 		Object nfo;
+		DatabaseCore::DBConfig cfg;
+		db->getDBCore().getConfig(h,cfg);
 		nfo.set("name",StrViewA(name))
 			   ("id",h)
-			   ("config",Object("max_logsize",db->getDBCore().getMaxLogSize(h))
-					   	   	   ("max_age",db->getDBCore().getMaxAge(h)));
+			   ("config",dbconfig2json(cfg));
 
 		out.push_back(nfo);
 		return true;
