@@ -134,7 +134,7 @@ void LevelDBIteratorBase::init(const std::string_view &start, bool rev) {
 	if (rev) {
 		if (start.empty()) iter->SeekToLast();
 		else iter->Seek(str2slice(start));
-		if (iter->Valid()) iter->Prev();
+		if (iter->Valid()) iter->Prev(); else iter->SeekToLast();
 		get_next=&LevelDBIteratorBase::last;
 	} else {
 		if (start.empty()) iter->SeekToFirst();

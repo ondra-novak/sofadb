@@ -23,6 +23,18 @@ DatabaseCore::DatabaseCore(PKeyValueDatabase db):maindb(db) {
 	loadViews();
 }
 
+SeqNum DatabaseCore::getSeqNumFromDB(const std::string_view &prefix) {
+	SeqNum sq;
+	Iterator maxseq (maindb->findRange(prefix, true));
+
+	if (maxseq.getNext()) {
+		extract_from_key(maxseq->first,prefix.length(),sq);
+	} else {
+		sq=0;
+	}
+	return sq+1;
+
+}
 
 void DatabaseCore::loadDBs() {
 	std::string key;
@@ -50,16 +62,12 @@ void DatabaseCore::loadDBs() {
 		nfo->name = c.first;
 		idmap[nfo->name] = c.second;
 
-		key_seq(key, c.second);
-		Iterator maxseq (maindb->findRange(key, true));
 
-		if (maxseq.getNext()) {
-			SeqNum sq;
-			extract_from_key(maxseq->first,key.length(),sq);
-			nfo->nextSeqNum = sq+1;
-		} else {
-			nfo->nextSeqNum = 1;
-		}
+
+		key_seq(key, c.second);
+		nfo->nextSeqNum = getSeqNumFromDB(key);
+		key_object_index(key, c.second);
+		nfo->nextHistSeqNum = getSeqNumFromDB(key);
 
 		loadDBConfig(c.second,nfo->cfg);
 
@@ -68,16 +76,6 @@ void DatabaseCore::loadDBs() {
 
 
 }
-
-template<typename T>
-void DatabaseCore::storeProp(PInfo nfo, Handle h, std::string_view name, const T &prop) {
-	key_dbconfig(nfo->key, h, name);
-	serialize_value(nfo->value, prop);
-	PChangeset chg = beginBatch(nfo);
-	chg->put(nfo->key, nfo->value);
-	endBatch(nfo);
-}
-
 
 void DatabaseCore::loadViews() {
 
@@ -121,6 +119,8 @@ DatabaseCore::Handle DatabaseCore::create(const std::string_view& name) {
 
 	std::lock_guard<std::recursive_mutex> _(lock);
 
+	std::string key,value;
+
 	auto xf = idmap.find(name);
 	if (xf != idmap.end()) return xf->second;
 	if (name.empty()) return invalid_handle;
@@ -131,11 +131,11 @@ DatabaseCore::Handle DatabaseCore::create(const std::string_view& name) {
 	nfo.nextSeqNum = 1;
 	idmap.insert(std::pair<std::string_view, Handle>(nfo.name,h));
 
-	key_db_map(nfo.key,name);
-	serialize_value(nfo.value,h);
+	key_db_map(key,name);
+	serialize_value(value,h);
 
 	PChangeset chst = maindb->createChangeset();
-	chst->put(nfo.key,nfo.value);
+	chst->put(key,value);
 	chst->commit();
 
 	if (observer) observer(event_create,h,0);
@@ -162,6 +162,9 @@ bool DatabaseCore::erase(Handle h) {
 	if (observer) observer(event_close, h,nfo->nextSeqNum);
 
 	onBatchClose(h,[h,this]() {
+
+		std::string key,value;
+
 		std::unique_ptr<Info> nfo (std::move(dblist[h]));
 		if (nfo == nullptr) return;
 
@@ -171,16 +174,19 @@ bool DatabaseCore::erase(Handle h) {
 
 		PChangeset chst = maindb->createChangeset();
 
-		key_db_map(nfo->key, nfo->name);
-		chst->erase(nfo->key);
-		key_docs(nfo->key,h);
-		chst->erasePrefix(nfo->key);
-		key_doc_revs(nfo->key, h);
-		chst->erasePrefix(nfo->key);
-		key_dbconfig(nfo->key, h);
-		chst->erasePrefix(nfo->key);
-		key_seq(nfo->key, h);
-		chst->erasePrefix(nfo->key);
+
+		key_db_map(key, nfo->name);
+		chst->erase(key);
+		key_docs(key,h);
+		chst->erasePrefix(key);
+		key_doc_revs(key, h);
+		chst->erasePrefix(key);
+		key_dbconfig(key, h);
+		chst->erasePrefix(key);
+		key_seq(key, h);
+		chst->erasePrefix(key);
+		key_object_index(key, h);
+		chst->erasePrefix(key);
 		chst->commit();
 		flushWriteState(nfo->writeState);
 	});
@@ -228,13 +234,15 @@ bool DatabaseCore::storeUpdate(Handle h, const RawDocument& doc) {
 
 	PChangeset chng = beginBatch(nfo);
 
+	std::string key,value, key2, value2;
+
 	//generate new sequence id
 	auto seqid = nfo->nextSeqNum++;
 
-	document2value(nfo->value,  doc, seqid);
+	document2value(value,  doc, seqid);
 
 	//prepare key (contains docid)
-	key_docs(nfo->key,h,doc.docId);
+	key_docs(key,h,doc.docId);
 
 	//if there is already previous revision
 	//we need to put it to the historical revision index
@@ -245,31 +253,30 @@ bool DatabaseCore::storeUpdate(Handle h, const RawDocument& doc) {
 	//lookup performance
 
 	//so try to get current revision
-	if (maindb->lookup(nfo->key, nfo->value2)) {
+	if (maindb->lookup(key, value2)) {
 		RawDocument curdoc;
-		value2document(nfo->value2, curdoc);
+		value2document(value2, curdoc);
 		//check: if revisions are same, this is error, stop here
 		if (curdoc.revision == doc.revision) {
 			endBatch(h);
 			return false;
 		}
-		//prepare key for historical index
-		key_doc_revs(nfo->key2, h, doc.docId, curdoc.revision);
-		//put document to the historical table
-		chng->put(nfo->key2,nfo->value2);
-		//generate its seq number
-		key_seq(nfo->key2,h,curdoc.seq_number);
-		//erase seq_number, because only current revisions are streamed
-		chng->erase(nfo->key2);
+		//erase current seq_number slot
+		key_seq(key2,h,curdoc.seq_number);
+		chng->erase(key2);
+
+		curdoc.docId = doc.docId;
+		//copy revision to history
+		storeToHistory(nfo, h, curdoc);
 	}
 	//now put the document to the storage
-	chng->put(nfo->key,nfo->value);
+	chng->put(key,value);
 	//generate key for sequence
-	key_seq(nfo->key, h, seqid);
+	key_seq(key, h, seqid);
 	//serialize document ID
-	serialize_value(nfo->value,doc.docId);
+	serialize_value(value,doc.docId);
 	//put it to database
-	chng->put(nfo->key,nfo->value);
+	chng->put(key,value);
 	//all done
 	endBatch(nfo);
 
@@ -278,17 +285,35 @@ bool DatabaseCore::storeUpdate(Handle h, const RawDocument& doc) {
 	return true;
 }
 
+void DatabaseCore::storeToHistory(PInfo dbf, Handle h, const RawDocument &doc) {
+	std::string key,value;
+
+	PChangeset chng = beginBatch(dbf);
+
+	SeqNum sq = dbf->nextHistSeqNum++;
+	key_doc_revs(key, h, doc.docId, doc.revision);
+	if (maindb->lookup(key, value)) {
+		Timestamp tm;
+		SeqNum oldsq;
+		extract_value(value,  oldsq, tm);
+		key_object_index(value,h,oldsq);
+		chng->erase(value);
+	}
+	serialize_value(value,sq,doc.timestamp);
+	chng->put(key, value);
+	key_object_index(key,h,sq);
+	document2value(value,doc,doc.seq_number);
+	chng->put(key,value);
+	endBatch(dbf);
+}
+
+
 bool DatabaseCore::storeToHistory(Handle h, const RawDocument &doc) {
 	PInfo nfo = getDatabaseState(h);
 	if (nfo == nullptr) return false;
 
-	PChangeset chng = beginBatch(nfo);
+	storeToHistory(nfo,h,doc);
 
-	key_doc_revs(nfo->key, h,doc.docId, doc.revision);
-	document2value(nfo->value,  doc, doc.seq_number);
-	chng->put(nfo->key, nfo->value);
-
-	endBatch(nfo);
 	return true;
 
 }
@@ -308,8 +333,7 @@ bool DatabaseCore::findDoc(Handle h, const std::string_view& docid, RawDocument&
 	return true;
 }
 
-bool DatabaseCore::findDoc(Handle h, const std::string_view& docid, RevID revid,
-		RawDocument& content, std::string &storage) {
+bool DatabaseCore::findDoc(Handle h, const std::string_view& docid, RevID revid, RawDocument& content, std::string &storage) {
 	std::string key;
 	key_docs(key, h, docid);
 	if (!maindb->lookup(key,storage)) return false;
@@ -318,6 +342,10 @@ bool DatabaseCore::findDoc(Handle h, const std::string_view& docid, RevID revid,
 	if (content.revision != revid) {
 		key_doc_revs(key,h,docid,revid);
 		if (!maindb->lookup(key,storage)) return false;
+		SeqNum sq;
+		extract_value(storage, sq);
+		key_object_index(key, h, sq);
+		if (!maindb->lookup(key, storage)) return false;
 	}
 	value2document(storage, content);
 	return true;
@@ -326,7 +354,7 @@ bool DatabaseCore::findDoc(Handle h, const std::string_view& docid, RevID revid,
 bool DatabaseCore::enumAllRevisions(Handle h, const std::string_view& docid,
 		std::function<void(const RawDocument&)> callback) {
 
-	std::string key;
+	std::string key,value;
 	RawDocument docinfo;
 	docinfo.docId = docid;
 	if (!findDoc(h, docid, docinfo, key)) return false;
@@ -334,8 +362,13 @@ bool DatabaseCore::enumAllRevisions(Handle h, const std::string_view& docid,
 	key_doc_revs(key, h, docid);
 	Iterator iter(maindb->findRange(key));
 	while (iter.getNext()) {
-		value2document(iter->second, docinfo);
-		callback(docinfo);
+		SeqNum sq;
+		extract_value(iter->second, sq);
+		key_object_index(key, h ,sq);
+		if (maindb->lookup(key, value)) {
+			value2document(value, docinfo);
+			callback(docinfo);
+		}
 	}
 	return true;
 }
@@ -344,15 +377,18 @@ void DatabaseCore::eraseDoc(Handle h, const std::string_view& docid, KeySet &mod
 	PInfo nfo = getDatabaseState(h);
 	if (nfo == nullptr) return ;
 
+	std::string key;
+
+
 	PChangeset chng = beginBatch(nfo);
 	enumAllRevisions(h, docid,[&](const RawDocument &docinf) {
-		key_doc_revs(nfo->key, h, docid, docinf.revision);
-		chng->erase(nfo->key);
-		key_seq(nfo->key, h, docinf.seq_number);
-		chng->erase(nfo->key);
+		key_doc_revs(key, h, docid, docinf.revision);
+		chng->erase(key);
+		key_seq(key, h, docinf.seq_number);
+		chng->erase(key);
 	});
-	key_docs(nfo->key,h, docid);
-	chng->erase(nfo->key);
+	key_docs(key,h, docid);
+	chng->erase(key);
 
 	for (auto &&v : nfo->viewState) {
 		view_updateDocument(h, v.first, docid, std::basic_string_view<ViewUpdateRow>(), modifiedKeys);
@@ -362,14 +398,24 @@ void DatabaseCore::eraseDoc(Handle h, const std::string_view& docid, KeySet &mod
 
 }
 
-void DatabaseCore::eraseHistoricalDoc(Handle h, const std::string_view& docid,
-		RevID revision) {
+void DatabaseCore::eraseHistoricalDoc(Handle h, const std::string_view& docid, RevID revision) {
 	PInfo nfo = getDatabaseState(h);
 	if (nfo == nullptr) return ;
-	PChangeset chng = beginBatch(nfo);
-	key_doc_revs(nfo->key, h, docid, revision);
-	chng->erase(nfo->key);
-	endBatch(nfo);
+
+
+	std::string key,value;
+
+	key_doc_revs(key, h, docid, revision);
+	if (maindb->lookup(key,value)) {
+		PChangeset chng = beginBatch(nfo);
+		SeqNum oldsq;
+		extract_value(value, oldsq);
+		key_object_index(value,h,oldsq);
+		chng->erase(value);
+		chng->erase(key);
+		endBatch(nfo);
+	}
+
 
 }
 
@@ -493,15 +539,17 @@ SeqNum DatabaseCore::needViewUpdate(Handle h, ViewID view) {
 }
 
 bool DatabaseCore::updateViewState(Handle h, ViewID view, SeqNum seqNum) {
+	std::string key,value;
+
 	PInfo nfo = getDatabaseState(h);
 	if (nfo == nullptr) return false;
 	auto iter = nfo->viewState.find(view);
 	if (iter == nfo->viewState.end()) return false;
 	iter->second.seqNum = seqNum;
 	PChangeset chng = beginBatch(nfo);
-	key_view_state(nfo->key,h,view);
-	serialize_value(nfo->value,iter->second.seqNum, iter->second.name);
-	chng->put(nfo->key, nfo->value);
+	key_view_state(key,h,view);
+	serialize_value(value,iter->second.seqNum, iter->second.name);
+	chng->put(key, value);
 	endBatch(nfo);
 	return true;
 }
@@ -513,6 +561,8 @@ bool DatabaseCore::view_updateDocument(Handle h, ViewID view,
 
 	std::string key;
 	std::string value;
+	std::string key2,value2;
+
 	key_view_docs(key, view, docId);
 	PInfo nfo = getDatabaseState(h);
 	if (nfo == nullptr) return false;
@@ -524,8 +574,8 @@ bool DatabaseCore::view_updateDocument(Handle h, ViewID view,
 		while (!vv.empty()) {
 			extract_value(vv,kk,kcrs);
 			vv = kcrs(vv);
-			key_view_map(nfo->key,view,kk,docId);
-			chng->erase(nfo->key);
+			key_view_map(key,view,kk,docId);
+			chng->erase(key);
 			modifiedKeys.insert(std::string(kk));
 		}
 		chng->erase(key);
@@ -533,16 +583,16 @@ bool DatabaseCore::view_updateDocument(Handle h, ViewID view,
 	}
 	if (!updates.empty()) {
 		PChangeset chng = beginBatch(nfo);
-		nfo->value2.clear();
+		value2.clear();
 		for (auto &&c: updates) {
 			modifiedKeys.insert(std::string(c.key));
-			key_view_map(nfo->key,view,c.key,docId);
-			chng->put(nfo->key, c.value);
-			nfo->value2.append(c.key);
-			_misc::addSep(nfo->value2);
+			key_view_map(key,view,c.key,docId);
+			chng->put(key, c.value);
+			value2.append(c.key);
+			_misc::addSep(value2);
 		}
-		key_view_docs(nfo->key,view, docId);
-		chng->put(nfo->key,nfo->value2);
+		key_view_docs(key,view, docId);
+		chng->put(key,value2);
 		endBatch(nfo);
 	}
 	return true;
@@ -650,14 +700,16 @@ bool DatabaseCore::view_beginUpdate(Handle h, ViewID view) {
 }
 
 ViewID DatabaseCore::createView(Handle h, const std::string_view& name) {
+	std::string key,value;
+
 	auto dbf = getDatabaseState(h);
 	if (dbf == nullptr) return 0;
 	ViewID w = allocView();
 	dbf->viewState[w].name = name;
 	dbf->viewNameToID[std::string(name)] = w;
 	auto chng = beginBatch(dbf);
-	key_view_state(dbf->key, h, w);
-	serialize_value(dbf->value, std::uint64_t(0), name);
+	key_view_state(key, h, w);
+	serialize_value(value, std::uint64_t(0), name);
 	endBatch(dbf);
 	return w;
 }
@@ -672,21 +724,25 @@ ViewID DatabaseCore::findView(Handle h, const std::string_view& name) {
 
 bool DatabaseCore::rename(Handle h, const std::string_view& newname) {
 	if (newname.empty()) return false;
+
+	std::string key,key2,value;
+
+
 	auto dbf = getDatabaseState(h);
 	std::lock_guard<std::recursive_mutex> _(lock);
 	auto newn = idmap.find(newname);
 	if (newn == idmap.end()) {
 		idmap.erase(dbf->name);
-		key_db_map(dbf->key, dbf->name);
+		key_db_map(key, dbf->name);
 		dbf->name = newname;
-		key_db_map(dbf->key2, dbf->name);
+		key_db_map(key2, dbf->name);
 		idmap.insert(std::pair<std::string_view,Handle>(dbf->name, h));
 
-		serialize_value(dbf->value,h);
+		serialize_value(value,h);
 
 		PChangeset chst = maindb->createChangeset();
-		chst->erase(dbf->key);
-		chst->put(dbf->key2,dbf->value);
+		chst->erase(key);
+		chst->put(key2,value);
 		chst->commit();
 		return true;
 	} else {
@@ -743,16 +799,17 @@ json::Value dbconfig2json(const DatabaseCore::DBConfig &cfg) {
 
 bool DatabaseCore::storeDBConfig(Handle h, const DBConfig &cfg) {
 
+	std::string key,value;
 
 	PInfo dbf = getDatabaseState(h);
 	if (dbf == nullptr) return false;
 
 	json::Value data = dbconfig2json(cfg);
-	dbf->value.clear();
-	data.serializeBinary(JsonTarget(dbf->value), json::compressKeys);
-	key_dbconfig(dbf->key,h,"config");
+	value.clear();
+	data.serializeBinary(JsonTarget(value), json::compressKeys);
+	key_dbconfig(key,h,"config");
 	PChangeset chs = beginBatch(dbf);
-	chs->put(dbf->key, dbf->value);
+	chs->put(key, value);
 	dbf->cfg = cfg;
 	endBatch(dbf);
 	return true;
@@ -775,69 +832,69 @@ bool DatabaseCore::setConfig(Handle h, const DBConfig &cfg) {
 	return storeDBConfig(h, cfg);
 }
 
-void DatabaseCore::cleanHistory(Handle h, const std::string_view &docid) {
+struct HistStat {
+	Timestamp tm;
+	RevID rev;
+	SeqNum sq;
+};
+
+bool DatabaseCore::cleanHistory(Handle h, const std::string_view &docid) {
+
 	RawDocument topdoc;
 	std::string key;
-	if (!findDoc(h,docid,topdoc, key)) return;
-
-	key_doc_revs(key, h, docid);
-	Iterator iter(maindb->findRange(key));
-
-
-	std::vector<std::string> docdata;
-	std::vector<RawDocument> rawdocs;
-	std::vector<RevID> deldocs;;
-
-	while (iter.getNext()) {
-		docdata.push_back(iter->second);
-	}
-	rawdocs.reserve(docdata.size());
-	for (auto &&c: docdata) {
-		RawDocument doc;
-		value2document(c,doc);
-		rawdocs.push_back(doc);
-	}
-
-	auto sortfn = [](const RawDocument &a, const RawDocument &b) {
-		return a.timestamp > b.timestamp;
-	};
+	if (!findDoc(h,docid,topdoc, key)) return false;
 
 	DBConfig cfg;
 	getConfig(h,cfg);
 
-	std::sort(rawdocs.begin(), rawdocs.end(),sortfn);
+	key_doc_revs(key, h, docid);
+	Iterator iter(maindb->findRange(key));
+
+	std::vector<HistStat> hs;
+	std::vector<RevID> todel;
+
+	while (iter.getNext()) {
+		HistStat h;
+		extract_from_key(iter->first, key.length(), h.rev);
+		extract_value(iter->second, h.sq, h.tm);
+		hs.push_back(h);
+	}
+
+	auto sortfn = [](const HistStat &a, const HistStat &b) {
+		return a.tm > b.tm;
+	};
+
+	std::sort(hs.begin(), hs.end(),sortfn);
+
 	std::size_t now = std::chrono::duration_cast< std::chrono::milliseconds >(std::chrono::system_clock::now().time_since_epoch()).count();
 	std::size_t old = now-cfg.history_max_age;
-	while (rawdocs.size() > cfg.history_min_count && !rawdocs.empty() && rawdocs.back().timestamp < old) {
-		deldocs.push_back(rawdocs.back().revision);
-		rawdocs.pop_back();
+	while (hs.size() > cfg.history_min_count && !hs.empty() && hs.back().tm < old) {
+		todel.push_back(hs.back().rev);
+		hs.pop_back();
 	}
 
 	if (topdoc.deleted) {
-		while (rawdocs.size() > cfg.history_max_deleted) {
-			deldocs.push_back(rawdocs.back().revision);
-			rawdocs.pop_back();
+		while (hs.size() > cfg.history_max_deleted) {
+			todel.push_back(hs.back().rev);
+			hs.pop_back();
 		}
 	}
 
-	if (rawdocs.size() > cfg.history_max_count) {
-		Timestamp first = rawdocs[0].timestamp;
-		Timestamp last = rawdocs.back().timestamp;
-		rawdocs.erase(rawdocs.end());
-		rawdocs.pop_back();
-		std::size_t cnt = cfg.history_max_count;
-		if (cnt < 2) cnt = 0; else cnt = cnt - 2;
-		if (cnt == 0) for(auto &&c: rawdocs) deldocs.push_back(c.revision);
-		else {
-			Timestamp block = (first - last) / cnt;
+	/*if (rawdocs.size() > cfg.history_max_count) {
 
+	}*/
+
+	beginBatch(h,false);
+	try {
+		for (auto &&c: todel) {
+			eraseHistoricalDoc(h,docid,c);
 		}
+		endBatch(h);
+	} catch (...) {
+		endBatch(h);
+		throw;
 	}
-
-
-
-
-
+	return true;
 }
 
 

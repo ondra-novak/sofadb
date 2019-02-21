@@ -29,6 +29,7 @@ enum class IndexType {
 	view_docs = 7,			///doc->keys
 	view_state = 8,			///db,viewid -> seqnum
 	reduce_map = 9,			///key->value for reduce
+	object_index = 10,
 
 };
 
@@ -158,6 +159,12 @@ inline void key_reduce_map(std::string &key, std::uint32_t dbid, std::uint64_t r
 }
 inline void key_reduce_map(std::string &key, std::uint32_t dbid, std::uint64_t reduceid, const std::uint64_t &keys) {
 	build_key(key, IndexType::reduce_map,dbid, reduceid, keys);
+}
+inline void key_object_index(std::string &key, std::uint32_t dbid,  std::uint64_t idx) {
+	build_key(key, IndexType::object_index,dbid, idx);
+}
+inline void key_object_index(std::string &key, std::uint32_t dbid) {
+	build_key(key, IndexType::object_index,dbid);
 }
 
 inline unsigned int extract_from_key(const std::string_view &, std::size_t );

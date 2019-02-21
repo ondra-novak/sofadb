@@ -109,13 +109,10 @@ private:
 	struct Info {
 		std::string name;
 		SeqNum nextSeqNum = 1;
+		SeqNum nextHistSeqNum = 1;
 		WriteState writeState;
 		ViewStateMap viewState;
 		ViewNameToID viewNameToID;
-		///temporary buffer for key
-		std::string key,key2;
-		///temporary buffer for value
-		std::string value,value2;
 
 		DBConfig cfg;
 
@@ -492,7 +489,7 @@ public:
 	std::size_t getMaxLogSize(Handle h) ;
 
 
-	void cleanHistory(Handle h, const std::string_view &docid);
+	bool cleanHistory(Handle h, const std::string_view &docid);
 
 
 protected:
@@ -531,6 +528,9 @@ protected:
 
 	bool loadDBConfig(Handle h, DBConfig &cfg);
 	bool storeDBConfig(Handle h, const DBConfig &cfg);
+
+	void storeToHistory(PInfo dbf, Handle h, const RawDocument &doc);
+	SeqNum getSeqNumFromDB(const std::string_view &prefix);
 
 };
 
