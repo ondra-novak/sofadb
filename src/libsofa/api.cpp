@@ -18,17 +18,25 @@ SofaDB::SofaDB(PKeyValueDatabase kvdatabase)
 	:dbcore(kvdatabase)
 	,docdb(dbcore)
 	,eventRouter(new EventRouter(Worker::create(1)))
+	,mtask(dbcore)
 {
 	dbcore.setObserver(eventRouter->createObserver());
+	mtask.init(eventRouter);
 }
 
 SofaDB::SofaDB(PKeyValueDatabase kvdatabase, Worker worker)
 	:dbcore(kvdatabase)
 	,docdb(dbcore)
 	,eventRouter(new EventRouter(worker))
+	,mtask(dbcore)
 
 {
 	dbcore.setObserver(eventRouter->createObserver());
+	mtask.init(eventRouter);
+}
+
+SofaDB::~SofaDB() {
+	eventRouter->stop();
 }
 
 
