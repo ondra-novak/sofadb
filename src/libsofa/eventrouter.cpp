@@ -10,9 +10,30 @@
 
 namespace sofadb {
 
-EventRouter::EventRouter(Worker worker):worker(worker) {
+EventRouter::EventRouter(Worker worker):worker(worker),running(0) {
 
 }
+
+class EventRouter::CBGuard {
+public:
+	 CBGuard(EventRouter *me):me(me) {
+		 curcount = ++me->running;
+	 }
+	 CBGuard(const CBGuard &other):me(other.me) {
+		 curcount = ++me->running;
+	 }
+	 ~CBGuard() {
+		 if (--me->running == 0) {
+			 me->exitAll();
+		 }
+	 }
+	 std::uintptr_t getCount() const {return curcount;}
+
+
+protected:
+	 EventRouter *me;
+	 std::uintptr_t curcount;
+};
 
 void EventRouter::receiveEvent(DatabaseCore::ObserverEvent event,
 		Handle h, SeqNum seqnum) {
@@ -25,7 +46,8 @@ void EventRouter::receiveEvent(DatabaseCore::ObserverEvent event,
 		WaitHandle wh = b->second;
 		auto i = omap.find(wh);
 		if (i != omap.end()) {
-			worker >> [fn = std::move(i->second.observer)] {
+			CBGuard g(this);
+			worker >> [fn = std::move(i->second.observer),g] {
 				fn(true);
 			};
 		}
@@ -33,7 +55,8 @@ void EventRouter::receiveEvent(DatabaseCore::ObserverEvent event,
 		b = oph.erase(b);
 	}
 	for (auto &&c : globlist) {
-		worker >> [event,h,seqnum,fn = GlobalObserver(c)] {
+		CBGuard g(this);
+		worker >> [event,h,seqnum,fn = GlobalObserver(c),g] {
 			fn(event,h,seqnum);
 		};
 	}
@@ -102,13 +125,7 @@ bool EventRouter::removeObserver(ObserverHandle wh) {
 }
 
 EventRouter::~EventRouter() {
-	Sync _(lock);
-	if (schevent != nullptr) {
-		std::condition_variable cond;
-		schexit = &cond;
-		reschedule();
-		schexit->wait(_);
-	}
+	stop();
 }
 
 
@@ -121,7 +138,8 @@ void EventRouter::reschedule() {
 		schevent->notify_all();
 	}
 	if (schexit == nullptr) {
-		worker >> [=] {
+		CBGuard g(this);
+		worker >> [g,this] {
 
 			Sync _(lock);
 			if (schevent) {
@@ -180,4 +198,36 @@ void EventRouter::reschedule() {
 
 }
 
+void EventRouter::stop() {
+
+	Sync _(lock);
+	if (schevent != nullptr) {
+		std::condition_variable cond;
+		schexit = &cond;
+		reschedule();
+		schexit->wait(_);
+	}
+	globlist.clear();
+	omap.clear();
+	oph.clear();
+	snm.clear();
+	std::condition_variable c;
+	wrk_exit = &c;
+	{
+		CBGuard g(this);
+		worker>>[g] {
+			(void)g;
+		};
+	}
+	c.wait(_);
+	wrk_exit = nullptr;
+
+}
+
+void EventRouter::exitAll() {
+	Sync _(lock);
+	if (wrk_exit) wrk_exit->notify_all();
+}
+
 } /* namespace sofadb */
+

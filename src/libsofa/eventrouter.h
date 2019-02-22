@@ -108,6 +108,23 @@ public:
 	 */
 	bool removeObserver(ObserverHandle wh);
 
+	template<typename Fn>
+	bool listDBs(Fn &&fn) {
+		std::unique_lock<std::mutex> _(lock);
+		for (auto &x: snm)
+			if (!fn(x)) return false;
+		return true;
+	}
+
+	bool getLastSeqNum(Handle h, SeqNum &sn) {
+		std::unique_lock<std::mutex> _(lock);
+		auto iter = snm.find(h);
+		if (iter == snm.end()) return false;
+		sn = iter->second;
+		return true;
+	}
+
+	void stop();
 
 protected:
 
@@ -122,7 +139,10 @@ protected:
 	Worker worker;
 	std::mutex lock;
 	std::size_t cntr = 0;
-	std::condition_variable *schevent = nullptr, *schexit = nullptr;
+	std::condition_variable *schevent = nullptr, *schexit = nullptr, *wrk_exit=nullptr;
+	std::atomic<std::uintptr_t> running;;
+	class CBGuard;
+	void exitAll();
 
 	void reschedule();
 

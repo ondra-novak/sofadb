@@ -16,6 +16,7 @@
 #include "../libsofa/databasecore.h"
 #include "../libsofa/docdb.h"
 #include "../libsofa/systemdbs.h"
+#include "../libsofa/maintenancetask.h"
 #include "rpcapi.h"
 #include "debugapi.h"
 
@@ -84,8 +85,9 @@ int main(int argc, char **argv) {
 		serverObj.addRPCPath("/RPC", scfg);
 		serverObj.add_ping();
 		serverObj.add_listMethods();
+		auto sdb = std::make_shared<sofadb::SofaDB>(kvdb);
 
-		sofadb::RpcAPI rpcApi(std::make_shared<sofadb::SofaDB>(kvdb));
+		sofadb::RpcAPI rpcApi(sdb);
 		rpcApi.init(serverObj);
 		sofadb::DebugAPI debugApi(kvdb);
 		debugApi.init(serverObj);

@@ -855,7 +855,7 @@ bool DatabaseCore::cleanHistory(Handle h, const std::string_view &docid) {
 
 	while (iter.getNext()) {
 		HistStat h;
-		extract_from_key(iter->first, key.length(), h.rev);
+		extract_from_key(iter->first, key.length()+2, h.rev);
 		extract_value(iter->second, h.sq, h.tm);
 		hs.push_back(h);
 	}
@@ -880,9 +880,31 @@ bool DatabaseCore::cleanHistory(Handle h, const std::string_view &docid) {
 		}
 	}
 
-	/*if (rawdocs.size() > cfg.history_max_count) {
+	if (hs.size() > cfg.history_max_count && hs.size() > 2) {
+		std::size_t cnt = cfg.history_max_count;
+		if (cnt <=2) {
+			for (std::size_t i = 1, c = hs.size()-1; i < c; i++) {
+				todel.push_back(hs[i].rev);
+			}
+		} else {
+			while (hs.size() > cnt) {
+				std::size_t maxdist=static_cast<std::size_t>(-1);
+				std::size_t maxdistidx = 0;
+				for (std::size_t i = 1,c = hs.size()-1; i < c ; i++) {
+					std::size_t dist1 =  hs[i-1].tm - hs[i].tm;
+					std::size_t dist2 =  hs[i].tm - hs[i+1].tm;
+					std::size_t dist = std::min(dist1,dist2);
+					if (dist < maxdist) {
+						maxdist = dist;
+						maxdistidx = i;
+					}
+				}
+				todel.push_back(hs[maxdistidx].rev);
+				hs.erase(hs.begin()+maxdistidx);
+			}
+		}
 
-	}*/
+	}
 
 	beginBatch(h,false);
 	try {

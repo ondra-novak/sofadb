@@ -15,6 +15,7 @@
 #include "eventrouter.h"
 #include "replication.h"
 #include "filter.h"
+#include "maintenancetask.h"
 
 namespace sofadb {
 
@@ -25,6 +26,7 @@ public:
 
 	SofaDB(PKeyValueDatabase kvdatabase);
 	SofaDB(PKeyValueDatabase kvdatabase, Worker worker);
+	~SofaDB();
 
 	using Handle = DatabaseCore::Handle;
 	using Filter = std::function<json::Value(const json::Value &)>();
@@ -291,6 +293,7 @@ protected:
 	DatabaseCore dbcore;
 	DocumentDB docdb;
 	PEventRouter eventRouter;
+	MaintenanceTask mtask;
 
 };
 

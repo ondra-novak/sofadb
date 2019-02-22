@@ -58,7 +58,8 @@ namespace _misc {
 	template<typename ... Args>
 	inline void serialize_key(std::string &key, bool needSep, std::uint64_t x, Args && ... args) {
 		if (needSep) addSep(key);
-		for (int i = 0; i < 8; i++)	key.push_back(static_cast<char>((x >> (8*(8-i-1))) & 0xFF));
+		for (int i = 0; i < 8; i++)
+			key.push_back(static_cast<char>((x >> (8*(8-i-1))) & 0xFF));
 		serialize_key(key, false, std::forward<Args>(args)...);
 	}
 
@@ -72,7 +73,8 @@ namespace _misc {
 	template<typename ... Args>
 	inline void serialize_key(std::string &key, bool needSep, std::uint32_t x, Args && ... args) {
 		if (needSep) addSep(key);
-		for (int i = 0; i < 4; i++)	key.push_back(static_cast<char>((x >> (8*(8-i-1))) & 0xFF));
+		for (int i = 0; i < 4; i++)
+			key.push_back(static_cast<char>((x >> (8*(4-i-1))) & 0xFF));
 		serialize_key(key, false, std::forward<Args>(args)...);
 	}
 
