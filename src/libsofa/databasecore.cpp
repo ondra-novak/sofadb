@@ -203,7 +203,7 @@ DatabaseCore::PInfo DatabaseCore::getDatabaseState(Handle h) {
 }
 
 void DatabaseCore::flushWriteState(WriteState &st) {
-	st.curBatch->commit();
+	if (st.curBatch != nullptr) st.curBatch->commit();
 	while (!st.waiting.empty() && st.lockCount == 0) {
 		auto &&fn = std::move(st.waiting.front());
 		st.waiting.pop();
@@ -475,7 +475,7 @@ SeqNum DatabaseCore::readChanges(Handle h, SeqNum from, bool reversed,
 	Iterator iter(maindb->findRange(key1, key2));
 
 	DocID docId;
-	SeqNum seq;
+	SeqNum seq = from;
 
 	while (iter.getNext()) {
 		extract_value(iter->second,docId);

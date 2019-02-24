@@ -83,7 +83,16 @@ public:
 	WaitHandle  waitForEvent(Handle db, SeqNum since, std::size_t timeout, Observer &&observer);
 
 	///Cancels waiting
-	bool cancelWait(WaitHandle wh);
+	/**
+	 * @param wh handle returned by waitForEvent function
+	 * @param notify_fn set true if you need to notify observer about cancelation. This
+	 * causes, that observer will be executed with false as argument. Note that
+	 * execution is queued to the worker and provided asynchronously
+	 *
+	 * @retval true success
+	 * @retval false not found
+	 */
+	bool cancelWait(WaitHandle wh, bool notify_fn = false);
 
 
 	///registers global event observer
@@ -126,6 +135,11 @@ public:
 
 	void stop();
 
+	template<typename Fn>
+	void dispatch(Fn &&fn) {
+		worker >> std::move(fn);
+	}
+
 protected:
 
 
@@ -140,7 +154,7 @@ protected:
 	std::mutex lock;
 	std::size_t cntr = 0;
 	std::condition_variable *schevent = nullptr, *schexit = nullptr, *wrk_exit=nullptr;
-	std::atomic<std::uintptr_t> running;;
+	std::atomic<std::uintptr_t> running, schrev;
 	class CBGuard;
 	void exitAll();
 

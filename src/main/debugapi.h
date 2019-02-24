@@ -23,6 +23,8 @@ public:
 	void rpcDump(json::RpcRequest req);
 	void rpcErase(json::RpcRequest req);
 	void rpcPut(json::RpcRequest req);
+	void rpcSetCtx(json::RpcRequest req);
+	void rpcGetCtx(json::RpcRequest req);
 
 protected:
 	PKeyValueDatabase kvdb;

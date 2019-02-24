@@ -89,9 +89,9 @@ json::Value DocumentDB::get(Handle h, const std::string_view& id, const std::str
 
 void DocumentDB::serializePayload(const json::Value &newhst, const json::Value &conflicts, const json::Value &payload,  std::string &tmp) {
 	tmp.clear();
-	newhst.serializeBinary(JsonTarget(tmp),0);
-	conflicts.serializeBinary(JsonTarget(tmp),0);
-	payload.serializeBinary(JsonTarget(tmp),json::compressKeys);
+	newhst.stripKey().serializeBinary(JsonTarget(tmp),0);
+	conflicts.stripKey().serializeBinary(JsonTarget(tmp),0);
+	payload.stripKey().serializeBinary(JsonTarget(tmp),json::compressKeys);
 }
 
 PutStatus DocumentDB::json2rawdoc(const json::Value &doc, DatabaseCore::RawDocument  &rawdoc, bool new_edit) {
@@ -342,7 +342,7 @@ bool DocumentDB::listDocs(Handle h, const std::string_view& start,
 
 SeqNum DocumentDB::readChanges(Handle h, const SeqNum &since, bool reversed, OutputFormat format,  ResultCB &&cb) {
 	std::string tmp;
-	return core.readChanges(h, since, reversed, [&](const DocID& docid, const SeqNum &sq) {
+	return core.readChanges(h, since, reversed, [&](const DocID& docid, const SeqNum &) {
 		DatabaseCore::RawDocument rawdoc;
 		if (!core.findDoc(h,docid, rawdoc, tmp)) return true;
 		Value v = parseDocument(rawdoc, format | OutputFormat::deleted);
@@ -355,7 +355,7 @@ SeqNum DocumentDB::readChanges(Handle h, const SeqNum &since, bool reversed, Out
 	if (flt == nullptr) return readChanges(h,since,reversed,format,std::move(cb));
 	std::string tmp;
 	return core.readChanges(h, since, reversed,
-				[&](const DocID& docid, const SeqNum &sq) {
+				[&](const DocID& docid, const SeqNum &) {
 		DatabaseCore::RawDocument rawdoc;
 		if (!core.findDoc(h,docid, rawdoc, tmp)) return true;
 		Value v = flt(parseDocument(rawdoc, format | OutputFormat::deleted | OutputFormat::data | OutputFormat::log));

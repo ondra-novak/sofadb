@@ -45,17 +45,20 @@ void MaintenanceTask::init(PEventRouter router) {
 }
 
 void MaintenanceTask::init_task(DatabaseCore &dbcore, PEventRouter rt, Handle h, SeqNum s) {
-	logInfo("Maintenance monitoring ACTIVE on db $1 since $2", h, s);
+	logInfo("Maintenance monitoring is ACTIVE on db $1 since $2", h, s);
 	auto task = [&dbcore,rt,h,s](bool){
 		SeqNum sq;
 		if (rt->getLastSeqNum(h,sq)) {
-			dbcore.readChanges(h,s,false,[&](const std::string_view &docId, SeqNum) {
-				dbcore.cleanHistory(h,docId);
-				return true;
-			});
+			if (sq != s) {
+				logInfo("Maintenance is RUNNING on db $1 since $2", h, s);
+				dbcore.readChanges(h,s,false,[&](const std::string_view &docId, SeqNum) {
+					dbcore.cleanHistory(h,docId);
+					return true;
+				});
+			}
 			init_task(dbcore, rt,h,sq);
 		} else {
-			logInfo("Maintenance monitoring REMOVED on db $1 since $2", h, s);
+			logInfo("Maintenance monitoring was REMOVED on db $1 since $2", h, s);
 		}
 	};
 	EventRouter::WaitHandle wh = rt->waitForEvent(h,s,1000*86400, task);

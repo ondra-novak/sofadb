@@ -166,6 +166,7 @@ public:
 	static char *serializeStrRev(RevID rev, char *out, int leftZeroes = 12);
 	static json::String serializeStrRev(RevID rev);
 
+	DatabaseCore &getDBCore() {return core;}
 protected:
 	DatabaseCore &core;
 

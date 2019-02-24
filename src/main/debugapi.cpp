@@ -26,6 +26,8 @@ void DebugAPI::init(RpcServer& server) {
 	server.add("Debug.dump",this,&DebugAPI::rpcDump);
 	server.add("Debug.erase",this,&DebugAPI::rpcErase);
 	server.add("Debug.put",this,&DebugAPI::rpcPut);
+	server.add("Debug.setCtx",this,&DebugAPI::rpcSetCtx);
+	server.add("Debug.getCtx",this,&DebugAPI::rpcGetCtx);
 }
 
 void DebugAPI::rpcDump(json::RpcRequest req) {
@@ -79,5 +81,29 @@ void DebugAPI::rpcPut(json::RpcRequest req) {
 	chset->commit();
 	req.setResult(true);
 }
+
+void DebugAPI::rpcSetCtx(json::RpcRequest req) {
+	static Value argformat = {"string", "any"};
+	if (!req.checkArgs(argformat)) return req.setArgError();
+	Value args = req.getArgs();
+	StrViewA key = args[0].getString();
+	Value v = args[1];
+	req.getConnContext()->store(key, v);
+	req.setResult(true);
+
+}
+void DebugAPI::rpcGetCtx(json::RpcRequest req) {
+	static Value argformat = {"string"};
+	if (!req.checkArgs(argformat)) return req.setArgError();
+	Value args = req.getArgs();
+	StrViewA key = args[0].getString();
+	Value v = req.getConnContext()->retrieve(key);
+	if (v.defined())
+		req.setResult(v);
+	else
+		req.setError(404,"not_found");
+
+}
+
 
 } /* namespace sofadb */

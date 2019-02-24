@@ -10,7 +10,7 @@
 
 namespace sofadb {
 
-EventRouter::EventRouter(Worker worker):worker(worker),running(0) {
+EventRouter::EventRouter(Worker worker):worker(worker),running(0),schrev(0) {
 
 }
 
@@ -95,10 +95,16 @@ EventRouter::WaitHandle EventRouter::waitForEvent(Handle db, SeqNum since, std::
 	return tmp;
 }
 
-bool EventRouter::cancelWait(WaitHandle wh) {
+bool EventRouter::cancelWait(WaitHandle wh, bool notify_fn) {
 	Sync _(lock);
 	auto i = omap.find(wh);
 	if (i == omap.end()) return false;
+
+	if (notify_fn) {
+		worker >> [observer = std::move(i->second.observer)] {
+			observer(false);
+		};
+	}
 
 	oph.erase(OPHKey(i->second.db, wh));
 	omap.erase(i);
@@ -132,66 +138,42 @@ EventRouter::~EventRouter() {
 void EventRouter::reschedule() {
 	using namespace ondra_shared;
 
-	logDebug("reschedule called");
 	if (schevent) {
-		logDebug("reschedule notify all");
 		schevent->notify_all();
 	}
 	if (schexit == nullptr) {
+
+		auto i = omap.begin();
+
+		TimePoint now = TimePoint::clock::now();
+		std::size_t nmili = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+		auto e = omap.lower_bound(nmili);
+		while (i != e) {
+			worker >> [fn = std::move(i->second.observer)] {
+				fn(false);
+			};
+			oph.erase(OPHKey(i->second.db, i->first));
+			i = omap.erase(i);
+		}
+		std::uint64_t rev = ++schrev;
+		if (i == omap.end()) return;
+
+		TimePoint until = now+std::chrono::milliseconds(i->first - nmili);
 		CBGuard g(this);
-		worker >> [g,this] {
+		worker >> [g,this,until,rev] {
 
 			Sync _(lock);
-			if (schevent) {
-				logDebug("reschedule duplicate exit");
-				return;
-			}
+			if (rev != schrev) return;
 
-			auto i = omap.begin();
-
-			TimePoint now = TimePoint::clock::now();
-			std::size_t nmili = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-			auto e = omap.lower_bound(nmili);
-			while (i != e) {
-				logDebug("sheduler cleanup");
-				worker >> [fn = std::move(i->second.observer)] {
-					fn(false);
-				};
-				oph.erase(OPHKey(i->second.db, i->first));
-				i = omap.erase(i);
-			}
-			if (i == omap.end()) {
-				logDebug("sheduler no work");
-				return;
-			}
-			logDebug("sheduler flush");
-			_.unlock();
-			worker.flush();
-			_.lock();
-			if (schevent) {
-				logDebug("reschedule duplicate exit (2)");
-				return;
-			}
-
-
-			TimePoint until = now+std::chrono::milliseconds(i->first - nmili);
 			std::condition_variable cond;
 			schevent = &cond;
-
-
-			logDebug("sheduler start wait");
 			auto waitres = cond.wait_until(_,until);
-			logDebug("sheduler stop wait");
-
 			schevent = nullptr;
 			if (schexit) {
 				schexit->notify_all();
-			}
-			if (waitres == std::cv_status::timeout) {
+			} else if (waitres == std::cv_status::timeout) {
 					reschedule();
 			}
-			logDebug("sheduler exit");
-
 		};
 	}
 
@@ -201,25 +183,34 @@ void EventRouter::reschedule() {
 void EventRouter::stop() {
 
 	Sync _(lock);
-	if (schevent != nullptr) {
-		std::condition_variable cond;
-		schexit = &cond;
-		reschedule();
-		schexit->wait(_);
-	}
+
 	globlist.clear();
-	omap.clear();
 	oph.clear();
 	snm.clear();
-	std::condition_variable c;
-	wrk_exit = &c;
-	{
+	for (auto &&o: omap) {
 		CBGuard g(this);
-		worker>>[g] {
+		worker >> [g,observer = o.second.observer]{
+			observer(false);
 			(void)g;
 		};
 	}
-	c.wait(_);
+	std::condition_variable exit_cond;
+
+	if (schevent != nullptr) {
+		schexit = &exit_cond;
+		reschedule();
+		schexit->wait(_);
+	}
+	std::condition_variable ackt_cond;
+	wrk_exit = &ackt_cond;
+	{
+		CBGuard g(this);
+		worker>>[g,this] {
+			Sync _(lock);
+			(void)g;
+		};
+	}
+	ackt_cond.wait(_);
 	wrk_exit = nullptr;
 
 }

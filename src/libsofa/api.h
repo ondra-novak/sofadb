@@ -261,24 +261,9 @@ public:
 	bool removeObserver(ObserverHandle handle);
 
 
-	class ReplicationServer:public IReplicationProtocol {
-	public:
-		ReplicationServer(Handle h, DocumentDB &docdb, PEventRouter eventRouter);
-		virtual void requestManifest(SeqNum since, std::size_t limit, std::size_t timeout, ManifestCallback &&cb);
-		virtual void sendMyManifest(const Manifest &manifest, DocRequestCallback &&cb);
-		virtual void requestDoc(const std::string_view &docid, const std::string_view &revid, DocCallback &&cb);
-		virtual void sendDoc(const json::Value &doc, bool history, SendDocCallback &&cb);
-		virtual void stopRequestManifest();
-	protected:
-		Handle h;
-		DocumentDB &docdb;
-		PEventRouter eventRouter;
-		WaitHandle wh = 0;
-	};
 
 
-
-	ReplicationServer createReplicationServer(Handle h);
+	IReplicationProtocol *createReplicationServer(Handle h);
 
 public:
 
