@@ -32,12 +32,16 @@ void RpcAPI::init(json::RpcServer& server) {
 }
 
 void RpcAPI::databaseCreate(json::RpcRequest req) {
-	static Value args(json::array,{"string"});
+	static Value args(json::array,{"string",{"undefined",Object
+			("storage",{"'permanent","'memory"})
+	}});
 
 	if (!req.checkArgs(args)) return req.setArgError();
 	Value a = req.getArgs();
 	String name = a[0].toString();
-	auto h = db->createDB(name.str());
+	Value cfg = a[1];
+	Storage storage = cfg["storage"].getString() == "memory"?Storage::memory:Storage::permanent;
+	auto h = db->createDB(name.str(),storage);
 	if (h == db->invalid_handle) return req.setError(400, "Invalid database name",name);
 	req.setResult(true);
 }
@@ -79,7 +83,8 @@ void RpcAPI::databaseList(json::RpcRequest req) {
 		db->getDBCore().getConfig(h,cfg);
 		nfo.set("name",StrViewA(name))
 			   ("id",h)
-			   ("config",dbconfig2json(cfg));
+			   ("config",dbconfig2json(cfg))
+			   ("storage",h & DatabaseCore::memdb_mask?"memory":"permanent");
 
 		out.push_back(nfo);
 		return true;

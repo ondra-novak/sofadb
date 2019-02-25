@@ -20,6 +20,10 @@
 
 
 namespace sofadb {
+enum class Storage {
+	permanent,
+	memory
+};
 
 class DatabaseCore {
 public:
@@ -35,6 +39,8 @@ public:
 
 	typedef std::uint32_t Handle;
 	static const Handle invalid_handle = static_cast<Handle>(-1);
+	static const Handle memdb_mask = 0x80000000;
+	static const Handle index_mask = 0x7FFFFFFF;
 
 	typedef std::function<void()> Callback;
 	typedef std::function<void(ObserverEvent, Handle, SeqNum)> Observer;
@@ -55,6 +61,7 @@ public:
 		///Contains max age of stored revision. Older revisions are deleted. Value is in milliseconds
 		/** Note that maintenance task will delete old revisions only when new revision is stored. Otherwise
 		 * older revision survives much longer
+		 *
 		 */
 		std::size_t history_max_age = 24*60*60*1000L; //30days
 		///Specifies minimum count of older revisions stored as full copy
@@ -113,6 +120,7 @@ private:
 		WriteState writeState;
 		ViewStateMap viewState;
 		ViewNameToID viewNameToID;
+		Storage storage;
 
 		DBConfig cfg;
 
@@ -143,7 +151,7 @@ public:
 	DatabaseCore(PKeyValueDatabase db);
 
 
-	Handle create(const std::string_view &name);
+	Handle create(const std::string_view &name, Storage storage = Storage::permanent);
 	Handle getHandle(const std::string_view &name) const;
 	bool erase(Handle h);
 	bool rename(Handle h, const std::string_view &newname);
@@ -494,10 +502,9 @@ public:
 
 protected:
 
-	PKeyValueDatabase maindb;
+	PKeyValueDatabase maindb,memdb;
 	DBList dblist;
 	NameToIDMap idmap;
-	ViewID nextViewID;
 	mutable std::recursive_mutex lock;
 	Observer observer;
 
@@ -520,7 +527,6 @@ protected:
 	ViewID allocView();
 
 	void loadDBs();
-	void loadViews();
 
 	template<typename T>
 	void storeProp(PInfo nfo, Handle h, std::string_view name, const T &prop);
@@ -532,6 +538,10 @@ protected:
 	void storeToHistory(PInfo dbf, Handle h, const RawDocument &doc);
 	SeqNum getSeqNumFromDB(const std::string_view &prefix);
 
+	PKeyValueDatabase selectDB(Handle h) const;
+	PKeyValueDatabase selectDB(Storage storage) const;
+
+	void loadDB(Iterator &iter);
 };
 
 } /* namespace sofadb */

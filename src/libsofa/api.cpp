@@ -40,8 +40,8 @@ SofaDB::~SofaDB() {
 }
 
 
-SofaDB::Handle SofaDB::createDB(const std::string_view& name) {
-	return dbcore.create(name);
+SofaDB::Handle SofaDB::createDB(const std::string_view& name, Storage storage) {
+	return dbcore.create(name,storage);
 
 }
 

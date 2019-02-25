@@ -44,7 +44,7 @@ public:
 	 * @param name name of the databse
 	 * @return handle to newly created database
 	 */
-	Handle createDB(const std::string_view &name);
+	Handle createDB(const std::string_view &name, Storage storage);
 	///Finds database by a name
 	/**
 	 * @param name name of the databse

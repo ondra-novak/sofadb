@@ -19,7 +19,7 @@ inline std::string_view slice2str(const leveldb::Slice &w) {
 }
 
 
-static std::string prefixLastKey(const std::string_view &prefix) {
+std::string prefixLastKey(const std::string_view &prefix) {
 	std::string lastKey (prefix);
 	while (!lastKey.empty()) {
 		unsigned char c = static_cast<unsigned char>(lastKey.back());

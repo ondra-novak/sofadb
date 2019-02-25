@@ -11,16 +11,18 @@
 #include <shared/logOutput.h>
 #include "keyformat.h"
 #include "kvapi_leveldb.h"
+#include "kvapi_memdb.h"
 
 namespace sofadb {
 
 DatabaseCore::DatabaseCore(PKeyValueDatabase db):maindb(db) {
 
+	memdb = new MemDB;
+
 	idmap.clear();
 	dblist.clear();
 
 	loadDBs();
-	loadViews();
 }
 
 SeqNum DatabaseCore::getSeqNumFromDB(const std::string_view &prefix) {
@@ -40,82 +42,24 @@ void DatabaseCore::loadDBs() {
 	std::string key;
 
 	key_db_map(key);
-	Handle maxHandle = 31;
 	Iterator iter (maindb->findRange(key));
-	std::vector<std::pair<std::string, Handle> > tmpstorage;
-
-	while (iter.getNext()) {
-		Handle h;
-		std::string name;
-		extract_from_key(iter->first, key.length(), name);
-		extract_value(iter->second,h);
-		tmpstorage.push_back(std::pair(std::move(name), h));
-		if (h > maxHandle) maxHandle = h;
-	}
-	dblist.resize(maxHandle+1);
-	for (auto &&c:tmpstorage) {
-		if (dblist[c.second] != nullptr) {
-			ondra_shared::logError("Can't load database $1 - handle conflict", c.first);
-			continue;
-		}
-		auto nfo = std::make_unique<Info>();
-		nfo->name = c.first;
-		idmap[nfo->name] = c.second;
-
-
-
-		key_seq(key, c.second);
-		nfo->nextSeqNum = getSeqNumFromDB(key);
-		key_object_index(key, c.second);
-		nfo->nextHistSeqNum = getSeqNumFromDB(key);
-
-		loadDBConfig(c.second,nfo->cfg);
-
-		dblist[c.second] = std::move(nfo);
-	}
-
-
+	dblist.clear();
+	loadDB(iter);
 }
 
-void DatabaseCore::loadViews() {
-
-	nextViewID = 1;
-	std::string key;
-	key_view_state(key);
-	Iterator iter(maindb->findRange(key));
-	while (iter.getNext()) {
-		Handle h;
-		ViewID v;
-		std::string_view name;
-		SeqNum seqNum;
-
-		extract_from_key(iter->first,key.length(), h, v);
-		extract_value(iter->second,seqNum, name);
-
-		auto dbst = getDatabaseState(h);
-		ViewState &st = dbst->viewState[v];
-		st.name = name;
-		st.seqNum = seqNum;
-		dbst->viewNameToID[std::string(name)] = v;
-		nextViewID = std::max(nextViewID, v+1);
-	}
-
-}
 
 DatabaseCore::Handle DatabaseCore::allocSlot() {
 	std::size_t cnt = dblist.size();
 	for (std::size_t i = 0; i < cnt; i++) {
 		if (dblist[i] == nullptr) {
-			dblist[i] = std::make_unique<Info>();
 			return i;
 		}
 	}
 	dblist.resize(cnt+1);
-	dblist[cnt] = std::make_unique<Info>();
 	return cnt;
 }
 
-DatabaseCore::Handle DatabaseCore::create(const std::string_view& name) {
+DatabaseCore::Handle DatabaseCore::create(const std::string_view& name, Storage storage) {
 
 	std::lock_guard<std::recursive_mutex> _(lock);
 
@@ -126,19 +70,19 @@ DatabaseCore::Handle DatabaseCore::create(const std::string_view& name) {
 	if (name.empty()) return invalid_handle;
 
 	Handle h = allocSlot();
-	Info &nfo = *dblist[h];
-	nfo.name = name;
-	nfo.nextSeqNum = 1;
-	idmap.insert(std::pair<std::string_view, Handle>(nfo.name,h));
 
-	key_db_map(key,name);
-	serialize_value(value,h);
+	if (storage == Storage::memory) h |= memdb_mask;
+
+	key_db_map(key,h);
+	serialize_value(value,name);
 
 	PChangeset chst = maindb->createChangeset();
 	chst->put(key,value);
 	chst->commit();
 
-	if (observer) observer(event_create,h,0);
+	Iterator iter(maindb->findRange(key,false));
+	loadDB(iter);
+
 
 	return h;
 }
@@ -172,11 +116,9 @@ bool DatabaseCore::erase(Handle h) {
 			deleteViewRaw(h, w.first);
 		}
 
-		PChangeset chst = maindb->createChangeset();
+		PChangeset chst = selectDB(h)->createChangeset();
 
 
-		key_db_map(key, nfo->name);
-		chst->erase(key);
 		key_docs(key,h);
 		chst->erasePrefix(key);
 		key_doc_revs(key, h);
@@ -188,8 +130,15 @@ bool DatabaseCore::erase(Handle h) {
 		key_object_index(key, h);
 		chst->erasePrefix(key);
 		chst->commit();
+
+		chst = maindb->createChangeset();
+		key_db_map(key, h);
+		chst->erase(key);
+		chst->commit();
+
 		flushWriteState(nfo->writeState);
 	});
+
 
 
 	return true;
@@ -198,6 +147,7 @@ bool DatabaseCore::erase(Handle h) {
 
 DatabaseCore::PInfo DatabaseCore::getDatabaseState(Handle h) {
 	std::lock_guard<std::recursive_mutex> _(lock);
+	h &= index_mask;
 	if (h >= dblist.size()) return nullptr;
 	else return PInfo(dblist[h].get());
 }
@@ -222,7 +172,7 @@ bool DatabaseCore::beginBatch(Handle h, bool exclusive ) {
 PChangeset DatabaseCore::beginBatch(PInfo &nfo) {
 	++nfo->writeState.lockCount;
 	if (nfo->writeState.curBatch == nullptr)
-		nfo->writeState.curBatch = maindb->createChangeset();
+		nfo->writeState.curBatch = selectDB(nfo->storage)->createChangeset();
 	return nfo->writeState.curBatch;
 }
 
@@ -253,7 +203,7 @@ bool DatabaseCore::storeUpdate(Handle h, const RawDocument& doc) {
 	//lookup performance
 
 	//so try to get current revision
-	if (maindb->lookup(key, value2)) {
+	if (selectDB(h)->lookup(key, value2)) {
 		RawDocument curdoc;
 		value2document(value2, curdoc);
 		//check: if revisions are same, this is error, stop here
@@ -292,7 +242,7 @@ void DatabaseCore::storeToHistory(PInfo dbf, Handle h, const RawDocument &doc) {
 
 	SeqNum sq = dbf->nextHistSeqNum++;
 	key_doc_revs(key, h, doc.docId, doc.revision);
-	if (maindb->lookup(key, value)) {
+	if (selectDB(h)->lookup(key, value)) {
 		Timestamp tm;
 		SeqNum oldsq;
 		extract_value(value,  oldsq, tm);
@@ -327,7 +277,7 @@ void DatabaseCore::endBatch(Handle h) {
 bool DatabaseCore::findDoc(Handle h, const std::string_view& docid, RawDocument& content, std::string &storage) {
 	std::string key;
 	key_docs(key, h, docid);
-	if (!maindb->lookup(key,storage)) return false;
+	if (!selectDB(h)->lookup(key,storage)) return false;
 	value2document(storage, content);
 	content.docId = docid;
 	return true;
@@ -336,16 +286,17 @@ bool DatabaseCore::findDoc(Handle h, const std::string_view& docid, RawDocument&
 bool DatabaseCore::findDoc(Handle h, const std::string_view& docid, RevID revid, RawDocument& content, std::string &storage) {
 	std::string key;
 	key_docs(key, h, docid);
-	if (!maindb->lookup(key,storage)) return false;
+	PKeyValueDatabase db = selectDB(h);
+	if (!db->lookup(key,storage)) return false;
 	value2document(storage, content);
 	content.docId = docid;
 	if (content.revision != revid) {
 		key_doc_revs(key,h,docid,revid);
-		if (!maindb->lookup(key,storage)) return false;
+		if (!db->lookup(key,storage)) return false;
 		SeqNum sq;
 		extract_value(storage, sq);
 		key_object_index(key, h, sq);
-		if (!maindb->lookup(key, storage)) return false;
+		if (!db->lookup(key, storage)) return false;
 	}
 	value2document(storage, content);
 	return true;
@@ -360,12 +311,13 @@ bool DatabaseCore::enumAllRevisions(Handle h, const std::string_view& docid,
 	if (!findDoc(h, docid, docinfo, key)) return false;
 	callback(docinfo);
 	key_doc_revs(key, h, docid);
-	Iterator iter(maindb->findRange(key));
+	auto db = selectDB(h);
+	Iterator iter(db->findRange(key));
 	while (iter.getNext()) {
 		SeqNum sq;
 		extract_value(iter->second, sq);
 		key_object_index(key, h ,sq);
-		if (maindb->lookup(key, value)) {
+		if (db->lookup(key, value)) {
 			value2document(value, docinfo);
 			callback(docinfo);
 		}
@@ -406,7 +358,7 @@ void DatabaseCore::eraseHistoricalDoc(Handle h, const std::string_view& docid, R
 	std::string key,value;
 
 	key_doc_revs(key, h, docid, revision);
-	if (maindb->lookup(key,value)) {
+	if (selectDB(h)->lookup(key,value)) {
 		PChangeset chng = beginBatch(nfo);
 		SeqNum oldsq;
 		extract_value(value, oldsq);
@@ -425,7 +377,7 @@ bool DatabaseCore::enumDocs(Handle h, const std::string_view& prefix,
 	RawDocument dinfo;
 	std::string key;
 	key_docs(key,h,prefix);
-	Iterator iter(maindb->findRange(key, reversed));
+	Iterator iter(selectDB(h)->findRange(key, reversed));
 	auto skip = key.length() - prefix.length();
 	while (iter.getNext()) {
 		value2document(iter->second, dinfo);
@@ -444,7 +396,7 @@ bool DatabaseCore::enumDocs(Handle h, const std::string_view& start_include,
 	std::string key1, key2;
 	key_docs(key1,h,start_include);
 	key_docs(key2,h,end_exclude);
-	Iterator iter(maindb->findRange(key1, key2));
+	Iterator iter(selectDB(h)->findRange(key1, key2));
 	auto skip = key1.length() - start_include.length();
 	while (iter.getNext()) {
 		value2document(iter->second, dinfo);
@@ -458,7 +410,7 @@ bool DatabaseCore::enumDocs(Handle h, const std::string_view& start_include,
 bool DatabaseCore::findDocBySeqNum(Handle h, SeqNum seqNum, DocID &docid) {
 	std::string key, value;
 	key_seq(key, h,seqNum);
-	if (!maindb->lookup(key, value)) return false;
+	if (!selectDB(h)->lookup(key, value)) return false;
 	extract_value(docid);
 	return true;
 
@@ -472,7 +424,7 @@ SeqNum DatabaseCore::readChanges(Handle h, SeqNum from, bool reversed,
 	key_seq(key2, h);
 	std::size_t skip = key2.length();
 	key_seq(key2, h+adj, 0);
-	Iterator iter(maindb->findRange(key1, key2));
+	Iterator iter(selectDB(h)->findRange(key1, key2));
 
 	DocID docId;
 	SeqNum seq = from;
@@ -487,7 +439,7 @@ SeqNum DatabaseCore::readChanges(Handle h, SeqNum from, bool reversed,
 
 bool DatabaseCore::viewLookup(ViewID viewID, const std::string_view& prefix,
 		bool reversed, std::function<bool(const ViewResult&)>&& callback) {
-
+/*
 	std::string key, value;
 	std::size_t skip;
 	key_view_map(key,viewID);
@@ -503,14 +455,14 @@ bool DatabaseCore::viewLookup(ViewID viewID, const std::string_view& prefix,
 		f = true;
 	}
 	return f;
-
+*/
 }
 
 bool DatabaseCore::viewLookup(ViewID viewID, const std::string_view& start_key,
 		const std::string_view& end_key, const std::string_view& start_doc,
 		const std::string_view& end_doc,
 		std::function<bool(const ViewResult&)>&& callback) {
-
+/*
 	std::string key1, key2, value;
 	std::size_t skip;
 	key_view_map(key1,viewID);
@@ -527,6 +479,7 @@ bool DatabaseCore::viewLookup(ViewID viewID, const std::string_view& start_key,
 		f = true;
 	}
 	return f;
+	*/
 }
 
 SeqNum DatabaseCore::needViewUpdate(Handle h, ViewID view) {
@@ -558,7 +511,7 @@ bool DatabaseCore::view_updateDocument(Handle h, ViewID view,
 		const std::string_view& docId,
 		const std::basic_string_view<ViewUpdateRow>& updates,
 		KeySet &modifiedKeys) {
-
+/*
 	std::string key;
 	std::string value;
 	std::string key2,value2;
@@ -596,6 +549,7 @@ bool DatabaseCore::view_updateDocument(Handle h, ViewID view,
 		endBatch(nfo);
 	}
 	return true;
+	*/
 }
 
 void DatabaseCore::endBatch(PInfo &nfo) {
@@ -673,6 +627,7 @@ bool DatabaseCore::deleteView(Handle h, ViewID view) {
 }
 
 void DatabaseCore::deleteViewRaw(Handle h, ViewID view) {
+	/*
 	PChangeset chset = maindb->createChangeset();
 	std::string key;
 	key_view_docs(key,view);
@@ -681,12 +636,14 @@ void DatabaseCore::deleteViewRaw(Handle h, ViewID view) {
 	chset->erasePrefix(key);
 	key_view_state(key,h,view);
 	chset->erase(key);
-
+*/
 }
 
 ViewID DatabaseCore::allocView() {
+	/*
 	std::lock_guard<std::recursive_mutex> _(lock);
 	return nextViewID;
+	*/
 }
 
 bool DatabaseCore::view_beginUpdate(Handle h, ViewID view) {
@@ -732,17 +689,15 @@ bool DatabaseCore::rename(Handle h, const std::string_view& newname) {
 	std::lock_guard<std::recursive_mutex> _(lock);
 	auto newn = idmap.find(newname);
 	if (newn == idmap.end()) {
+
+		key_db_map(key, h);
+		serialize_value(value, newname);
+
 		idmap.erase(dbf->name);
-		key_db_map(key, dbf->name);
-		dbf->name = newname;
-		key_db_map(key2, dbf->name);
 		idmap.insert(std::pair<std::string_view,Handle>(dbf->name, h));
 
-		serialize_value(value,h);
-
 		PChangeset chst = maindb->createChangeset();
-		chst->erase(key);
-		chst->put(key2,value);
+		chst->put(key,value);
 		chst->commit();
 		return true;
 	} else {
@@ -755,7 +710,9 @@ void DatabaseCore::setObserver(Observer&& observer) {
 	this->observer = std::move(observer);
 	Handle h = 0;
 	for (auto &&c: dblist) {
-		if (c != nullptr) this->observer(event_create,h,c->nextSeqNum-1);
+		if (c != nullptr) this->observer(event_create,
+				(c->storage == Storage::memory?memdb_mask:0)|h,
+				c->nextSeqNum-1);
 		++h;
 	}
 }
@@ -808,10 +765,10 @@ bool DatabaseCore::storeDBConfig(Handle h, const DBConfig &cfg) {
 	value.clear();
 	data.serializeBinary(JsonTarget(value), json::compressKeys);
 	key_dbconfig(key,h,"config");
-	PChangeset chs = beginBatch(dbf);
+	PChangeset chs = maindb->createChangeset();
 	chs->put(key, value);
 	dbf->cfg = cfg;
-	endBatch(dbf);
+	chs->commit();
 	return true;
 }
 
@@ -848,7 +805,8 @@ bool DatabaseCore::cleanHistory(Handle h, const std::string_view &docid) {
 	getConfig(h,cfg);
 
 	key_doc_revs(key, h, docid);
-	Iterator iter(maindb->findRange(key));
+	auto db = selectDB(h);
+	Iterator iter(db->findRange(key));
 
 	std::vector<HistStat> hs;
 	std::vector<RevID> todel;
@@ -919,6 +877,51 @@ bool DatabaseCore::cleanHistory(Handle h, const std::string_view &docid) {
 	return true;
 }
 
+PKeyValueDatabase DatabaseCore::selectDB(Handle h) const {
+	if (h & memdb_mask) return memdb; else return maindb;
+}
+PKeyValueDatabase DatabaseCore::selectDB(Storage storage) const {
+	if (storage == Storage::memory) return memdb; else return maindb;
+}
+
+void DatabaseCore::loadDB(Iterator &iter) {
+	std::string key;
+	while (iter.getNext()) {
+		Handle h;
+		std::string_view name;
+		extract_from_key(iter->first, 1, h);
+		extract_value(iter->second, name);
+		std::size_t idx = h & index_mask;
+		if (dblist.size()<=idx)
+			dblist.resize(idx+1);
+
+		auto nfo = std::make_unique<Info>();
+
+		nfo->name = name;
+		idmap[nfo->name] = h;
+
+		if ((h & memdb_mask) == 0) {
+
+			key_seq(key, h);
+			nfo->nextSeqNum = getSeqNumFromDB(key);
+			key_object_index(key, h);
+			nfo->nextHistSeqNum = getSeqNumFromDB(key);
+			nfo->storage = Storage::permanent;
+
+		} else {
+			nfo->nextSeqNum = 1;
+			nfo->nextHistSeqNum = 1;
+			nfo->storage = Storage::memory;
+		}
+
+		loadDBConfig(h,nfo->cfg);
+
+		dblist[idx] = std::move(nfo);
+
+		if (observer) observer(event_create,h,0);
+
+	}
+}
 
 
 } /* namespace sofadb */
