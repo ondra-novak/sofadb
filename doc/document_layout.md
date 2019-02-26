@@ -19,9 +19,9 @@ Layout is fixed, some fields are optional
 - **id** - contains document ID. The document can be retrieved under that ID
 - **rev** - contains document revision as a string. 
 - **data** - contains any arbitrary JSON as an user specified data. This field can be surpressed while one need to retrieve only metadata without possible large section containing user data.
-- **log** - contains list of historical revision (array of strings) starting by the recent one. The list can have zero, one or many items depend on how much of the history is recorder. Not all revisions can be also available to retrieve. This
+- **log** - contains list of historical revisions (array of strings) starting by the recent one. The list can have zero, one or many items depend on how much of the history is recorded. Not all revisions can be also available to retrieve. This
 field normally doesn't appear unless it is requested.
-- **conflicts** - appears always if the document is in conflicted state. Contains list of revisions (array of strings) of alternate revisions. These revisions must not appear in the log
+- **conflicts** - appears always if the document is in conflicted state. Contains list of revisions (array of strings) of alternative revisions. These revisions must not appear in the log
 - **deleted** - appear only if document is marked as deleted. This field doesn't appear unless it is requested. If the document is deleted and the field is not requested then document cannot be retrieved - considered as not existing
 - **timestamp** - contains timestamp of creation of this revision. The timestamp is in milliseconds since epoch.
 
@@ -31,8 +31,8 @@ field normally doesn't appear unless it is requested.
 code zero. Other characters are allowed (including UTF-8). Note that ID is used as key to many indexes, so try to keep
 ID smallest possible to reduce space requirement.
 - **rev** - Specify revision as string. The string must be BASE62 number with up to 10 digits (64 bit number). This field
-has different meaning during update compare to replication. For new document, the **rev** must not be specified. For
-update of the document, the **rev** must contain hash of the revision being updated. The database generates new revision id and sends it back to the client. For replication, the **rev** must contain revision ID of current revision. In this mode, there must be also **log** field containing other historical revisions.   
+has different meaning during update in compare to replication. For new document, the **rev** must not be specified. For
+update of the document, the **rev** must contain ID of the revision being updated. The database generates new revision ID and sends it back to the client. For replication, the **rev** must contain revision ID of current revision. In this mode, there must be also **log** field containing other historical revisions.   
 - **data** - contains user specified data, of any type. The field must be defined, but can be set to **null**.
 - **log** - this field is mandatory for replication, otherwise it is ignored. In replication mode it contains list of 
 revision IDs as array of strings, where the first revision ID refers to most recent revision.
