@@ -13,7 +13,7 @@
 #include <shared/ini_config.h>
 #include <stdexcept>
 
-namespace doxyhub {
+namespace sofadb {
 
 
 using ondra_shared::IniConfig;
