@@ -14,7 +14,7 @@
 #include <leveldb/options.h>
 #include <leveldb/filter_policy.h>
 
-namespace doxyhub {
+namespace sofadb {
 
 
 class ServerConfig {

@@ -20,7 +20,7 @@
 #include "rpcapi.h"
 #include "debugapi.h"
 
-using doxyhub::ServerConfig;
+using sofadb::ServerConfig;
 using ondra_shared::LogLevel;
 using ondra_shared::StdLogFile;
 using ondra_shared::StrViewA;
@@ -45,6 +45,7 @@ public:
 
 	ondra_shared::LogObject logobj;
 };
+
 
 
 int main(int argc, char **argv) {
