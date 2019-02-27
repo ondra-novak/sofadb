@@ -142,8 +142,8 @@ SofaDB::WaitHandle SofaDB::waitForChanges(Handle h, SeqNum since, std::size_t ti
 	return eventRouter->waitForEvent(h, since,timeout_ms,std::move(observer));
 }
 
-bool SofaDB::cancelWaitForChanges(WaitHandle wh) {
-	return eventRouter->cancelWait(wh);
+bool SofaDB::cancelWaitForChanges(WaitHandle wh, bool notify_fn) {
+	return eventRouter->cancelWait(wh,notify_fn);
 }
 
 PEventRouter SofaDB::getEventRouter() {

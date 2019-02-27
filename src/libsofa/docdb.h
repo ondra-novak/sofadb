@@ -163,8 +163,10 @@ public:
 	static json::Value parseDocument(const DatabaseCore::RawDocument &doc, OutputFormat format);
 
 	static RevID parseStrRev(const std::string_view &strrev);
-	static char *serializeStrRev(RevID rev, char *out, int leftZeroes = 12);
+	static std::string_view serializeStrRev(RevID rev, char *out, int leftZeroes = 12);
 	static json::String serializeStrRev(RevID rev);
+
+	static json::Value parseLog(std::string_view &payload);
 
 	DatabaseCore &getDBCore() {return core;}
 protected:

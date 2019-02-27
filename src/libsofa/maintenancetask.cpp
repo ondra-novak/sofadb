@@ -51,8 +51,8 @@ void MaintenanceTask::init_task(DatabaseCore &dbcore, PEventRouter rt, Handle h,
 		if (rt->getLastSeqNum(h,sq)) {
 			if (sq != s) {
 				logInfo("Maintenance is RUNNING on db $1 since $2", h, s);
-				dbcore.readChanges(h,s,false,[&](const std::string_view &docId, SeqNum) {
-					dbcore.cleanHistory(h,docId);
+				dbcore.readChanges(h,s,false,[&](const DatabaseCore::ChangeRec &rc) {
+					dbcore.cleanHistory(h,rc.docid);
 					return true;
 				});
 			}

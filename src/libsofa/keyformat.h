@@ -145,7 +145,7 @@ inline void key_view_docs(std::string &key, std::uint32_t dbid, std::uint32_t vi
 	build_key(key, IndexType::view_docs,dbid, viewid);
 }
 inline void key_view_docs(std::string &key, std::uint32_t dbid, std::uint32_t viewid, const std::string_view &docid) {
-	build_key(key, IndexType::view_docs, viewid, docid);
+	build_key(key, IndexType::view_docs, dbid, viewid, docid);
 }
 inline void key_view_state(std::string &key) {
 	build_key(key, IndexType::view_docs);

@@ -224,7 +224,7 @@ bool DatabaseCore::storeUpdate(Handle h, const RawDocument& doc) {
 	//generate key for sequence
 	key_seq(key, h, seqid);
 	//serialize document ID
-	serialize_value(value,doc.docId);
+	serialize_value(value,doc.revision,doc.docId);
 	//put it to database
 	chng->put(key,value);
 	//all done
@@ -417,7 +417,7 @@ bool DatabaseCore::findDocBySeqNum(Handle h, SeqNum seqNum, DocID &docid) {
 }
 
 SeqNum DatabaseCore::readChanges(Handle h, SeqNum from, bool reversed,
-		std::function<bool(const DocID&, const SeqNum&)>&& fn)  {
+		std::function<bool(const ChangeRec &)>&& fn)  {
 	std::string key1, key2;
 	int adj = reversed?0:1;
 	key_seq(key1, h, from+adj);
@@ -426,13 +426,14 @@ SeqNum DatabaseCore::readChanges(Handle h, SeqNum from, bool reversed,
 	key_seq(key2, h+adj, 0);
 	Iterator iter(selectDB(h)->findRange(key1, key2));
 
-	DocID docId;
+	std::string_view docId;
 	SeqNum seq = from;
+	RevID revid;
 
 	while (iter.getNext()) {
-		extract_value(iter->second,docId);
+		extract_value(iter->second,revid,docId);
 		extract_from_key(iter->first, skip, seq);
-		if (!fn(docId, seq)) return seq;
+		if (!fn(ChangeRec({docId,revid,seq}))) return seq;
 	}
 	return seq;
 }

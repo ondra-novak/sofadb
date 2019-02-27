@@ -237,7 +237,7 @@ public:
 	 * @retval true canceled
 	 * @retval false handle is no longer valid, probabily already triggered
 	 */
-	bool cancelWaitForChanges(WaitHandle wh);
+	bool cancelWaitForChanges(WaitHandle wh, bool notify_fn = false);
 
 	///Register global observer
 	/**

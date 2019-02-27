@@ -92,6 +92,12 @@ public:
 		std::size_t history_max_deleted = 0;
 	};
 
+	struct ChangeRec {
+		std::string_view docid;
+		RevID revid;
+		SeqNum seqnum;
+	};
+
 private:
 	struct WriteState {
 		PChangeset curBatch;
@@ -335,7 +341,7 @@ public:
 	 * @param fn function called with every result
 	 * @return SeqNum of last result, if zero returned, then no records are found for this DB
 	 */
-	SeqNum readChanges(Handle h, SeqNum from, bool reversed, std::function<bool(const DocID&, const SeqNum &)> &&fn);
+	SeqNum readChanges(Handle h, SeqNum from, bool reversed, std::function<bool(const ChangeRec &)> &&fn);
 
 
 	///Makes lookup to a view for key

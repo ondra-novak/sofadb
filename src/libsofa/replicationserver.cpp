@@ -33,16 +33,26 @@ void ReplicationServer::readManifestLk(SeqNum since, std::size_t limit,
 		json::Value filter, bool longpoll,
 		std::function<void(const Manifest&, SeqNum)>&& result) {
 
-	std::vector<ManifestItem> r;
 
-	SeqNum lastSeq = docdb.readChanges(h, since, false, OutputFormat::log|OutputFormat::deleted,
-			createFilter(filter), [&](json::Value doc){
-		r.push_back(ManifestItem ({doc["id"].toString(), doc["rev"].toString(), doc["log"]}));
+	DatabaseCore &dbcore = docdb.getDBCore();
+	std::string tmp;
+
+	DocFilter flt = createFilter(filter);
+	std::vector<DocRef> docs;
+	SeqNum lastSeq = docdb.getDBCore().readChanges(h, since, false,
+			[&](const DatabaseCore::ChangeRec &chrec){
+		if (flt != nullptr) {
+			DatabaseCore::RawDocument rawdoc;
+			if (!dbcore.findDoc(h,chrec.docid, chrec.revid, rawdoc, tmp)) return true;
+			json::Value doc = DocumentDB::parseDocument(rawdoc,OutputFormat::data_and_log_and_deleted);
+			if (!flt(doc).defined()) return true;
+		}
+		docs.push_back(DocRef(std::string(chrec.docid),chrec.revid));
 		return --limit > 0;
 	});
 
-	if (!r.empty()) {
-		result(Manifest(r.data(), r.size()), lastSeq);
+	if (!docs.empty()) {
+		result(Manifest(docs.data(),docs.size()), lastSeq);
 	}
 
 	if (longpoll) {
@@ -66,6 +76,22 @@ void ReplicationServer::readManifestLk(SeqNum since, std::size_t limit,
 
 void ReplicationServer::downloadDocs(const DownloadRequest& dwreq,
 		std::function<void(const DocumentList&)>&& callback) {
+
+	std::vector<json::Value> lst;
+	DatabaseCore &dbcore = docdb.getDBCore();
+	std::string tmp;
+
+	for (auto &&c : dwreq) {
+		DatabaseCore::RawDocument rawdoc;
+		if (dbcore.findDoc(h,c.id, c.rev, rawdoc, tmp)) {
+			json::Value v = DocumentDB::parseDocument(rawdoc,OutputFormat::data_and_log_and_deleted);
+			lst.push_back(v);
+		}
+		else {
+			lst.push_back(nullptr);
+		}
+	}
+	callback(DocumentList(lst.data(),lst.size()));
 }
 
 
@@ -87,11 +113,35 @@ void ReplicationServer::stopRead() {
 }
 
 void ReplicationServer::sendManifest(const Manifest& manifest,
-		std::function<void(const DownloadRequest&)>&& callback) {
+						std::function<void(const DownloadRequest&)>&& callback) {
+
+	std::string tmp;
+	DatabaseCore &dbcore = docdb.getDBCore();
+	std::vector<DocRef> request;
+
+	for (auto &&c: manifest) {
+		DatabaseCore::RawDocument rawdoc;
+		if (dbcore.findDoc(h,c.id, rawdoc, tmp)) {
+			if (c.rev == rawdoc.revision) continue;
+			std::string_view p = rawdoc.payload;
+			json::Value log = DocumentDB::parseLog(p);
+			if (log.indexOf(c.rev) != json::Value::npos) continue;
+		}
+		request.push_back(c);
+	}
+
+	callback(DownloadRequest(request.data(),request.size()));
 }
 
 void ReplicationServer::uploadDocs(const DocumentList& documents,
-		std::function<void(const PutStatusList&)>&& callback) {
+						std::function<void(const PutStatusList&)>&& callback) {
+
+	std::vector<PutStatus> st;
+	for (auto &&c: documents) {
+		st.push_back(docdb.replicator_put(h,c));
+	}
+	callback(PutStatusList(st.data(),st.size()));
+
 }
 
 } /* namespace sofadb */

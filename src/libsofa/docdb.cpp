@@ -29,14 +29,15 @@ RevID DocumentDB::parseStrRev(const std::string_view &strrev) {
 	}
 	return rev;
 }
-char *DocumentDB::serializeStrRev(RevID rev, char *out, int leftZeroes) {
-	if (rev == 0 && leftZeroes <= 0) return out;
-	out = serializeStrRev(rev/62, out, leftZeroes-1);
+std::string_view DocumentDB::serializeStrRev(RevID rev, char *out, int leftZeroes) {
+	if (rev == 0 && leftZeroes <= 0) return std::string_view(out,0);
+	auto r = serializeStrRev(rev/62, out, leftZeroes-1);
+	char *nx = out+r.size();
 	RevID d = rev % 62;
-	if (d < 10) *out = d+'0';
-	else if (d < 36) *out = d-10+'A';
-	else *out = d-36+'a';
-	return out+1;
+	if (d < 10) *nx = d+'0';
+	else if (d < 36) *nx = d-10+'A';
+	else *nx = d-36+'a';
+	return std::string_view(out,r.size()+1);
 }
 
 
@@ -45,8 +46,8 @@ String DocumentDB::serializeStrRev(RevID rev) {
 	constexpr auto digits = 12*sizeof(rev)/8;
 
 	return String(digits, [&](char *c) {
-		char *d = serializeStrRev(rev, c,digits);
-		return d-c;
+		auto res = serializeStrRev(rev, c,digits);
+		return res.size();
 	});
 }
 
@@ -278,6 +279,11 @@ PutStatus DocumentDB::replicator_put_history(Handle h, const json::Value &doc) {
 
 }
 
+json::Value DocumentDB::parseLog(std::string_view &payload) {
+		Value log = Value::parseBinary(JsonSource(payload), base64);
+		return log;
+}
+
 
 Value DocumentDB::parseDocument(const DatabaseCore::RawDocument& doc, OutputFormat format) {
 
@@ -297,7 +303,7 @@ Value DocumentDB::parseDocument(const DatabaseCore::RawDocument& doc, OutputForm
 	if (static_cast<int>(format & (OutputFormat::data | OutputFormat::log))) {
 
 		std::string_view p = doc.payload;
-		Value log = Value::parseBinary(JsonSource(p), base64);
+		Value log = parseLog(p);
 		if (format == OutputFormat::data) {
 			Value conflicts = Value::parseBinary(JsonSource(p), base64);
 			Value data = Value::parseBinary(JsonSource(p),base64);
@@ -306,6 +312,7 @@ Value DocumentDB::parseDocument(const DatabaseCore::RawDocument& doc, OutputForm
 			for (Value v:conflicts) {
 				c.push_back(serializeStrRev(v.getUInt()));
 			}
+
 			jdoc.set("data", data);
 			if (!c.empty())
 				jdoc.set("conflicts",c);
@@ -342,10 +349,11 @@ bool DocumentDB::listDocs(Handle h, const std::string_view& start,
 
 SeqNum DocumentDB::readChanges(Handle h, const SeqNum &since, bool reversed, OutputFormat format,  ResultCB &&cb) {
 	std::string tmp;
-	return core.readChanges(h, since, reversed, [&](const DocID& docid, const SeqNum &) {
+	return core.readChanges(h, since, reversed, [&](const DatabaseCore::ChangeRec &rc) {
 		DatabaseCore::RawDocument rawdoc;
-		if (!core.findDoc(h,docid, rawdoc, tmp)) return true;
-		Value v = parseDocument(rawdoc, format | OutputFormat::deleted);
+		if (!core.findDoc(h,rc.docid,rc.revid, rawdoc, tmp)) return true;
+		Value v = parseDocument(rawdoc, format);
+		if (v.isNull()) return true;
 		return cb(v);
 	});
 
@@ -355,13 +363,15 @@ SeqNum DocumentDB::readChanges(Handle h, const SeqNum &since, bool reversed, Out
 	if (flt == nullptr) return readChanges(h,since,reversed,format,std::move(cb));
 	std::string tmp;
 	return core.readChanges(h, since, reversed,
-				[&](const DocID& docid, const SeqNum &) {
+				[&](const DatabaseCore::ChangeRec &rc) {
 		DatabaseCore::RawDocument rawdoc;
-		if (!core.findDoc(h,docid, rawdoc, tmp)) return true;
-		Value v = flt(parseDocument(rawdoc, format | OutputFormat::deleted | OutputFormat::data | OutputFormat::log));
+		if (!core.findDoc(h,rc.docid, rc.revid, rawdoc, tmp)) return true;
+		Value doc = parseDocument(rawdoc, format | OutputFormat::data | OutputFormat::log);
+		if (doc.isNull()) return true;
+		Value v = flt(doc);
 		if (!v.defined()) return true;
 		if (format != OutputFormat::data) {
-			v = v.replace("data",Value());
+			v = doc.replace("data",Value());
 		}
 		if (format != OutputFormat::log) {
 			v = v.replace("log",Value());

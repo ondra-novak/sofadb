@@ -53,19 +53,18 @@ class IReplicationProtocol {
 public:
 
 	struct DocRef {
-		json::String id;
-		json::String rev;
-	};
-
-	struct ManifestItem: DocRef {
-		json::Value log;
+		std::string id;
+		RevID rev;
+		DocRef(std::string &&id,RevID rev):id(std::move(id)),rev(std::move(rev)) {}
+		DocRef(const std::string &id,RevID rev):id(id),rev(rev) {}
+		DocRef() {}
 	};
 
 	static const SeqNum error = SeqNum(-1);
 
 
 	using DownloadRequest = std::basic_string_view<DocRef>;
-	using Manifest = std::basic_string_view<ManifestItem>;
+	using Manifest = std::basic_string_view<DocRef>;
 	using DocumentList = std::basic_string_view<json::Value>;
 	using PutStatusList = std::basic_string_view<PutStatus>;
 	using WaitHandle = std::size_t;

@@ -273,44 +273,43 @@ void RpcAPI::databaseChanges(json::RpcRequest req) {
 			return;
 		}
 
-		SharedObserver observer = [rdb,nmap,ntfname,h,since,reversed,fmt,flt,req,offset,limit,abstm](SharedObserver self, bool not_timeout) mutable {
-			if (not_timeout) {
+		SharedObserver observer = [rdb,nmap,ntfname,h,since,reversed,fmt,flt,req,offset,limit](SharedObserver self, bool have_data) mutable -> void {
+			if (limit) {
 				bool failed = false;
-				since = rdb->readChanges(h, since, reversed, fmt, std::move(flt), [&](const Value &x) {
-					if (offset) {
-						offset--;
-						return true;
-					}
-					else {
-						if (!req.sendNotify(ntfname,x)) {
-							failed = true;
-							return false;
+				if (have_data) {
+					since = rdb->readChanges(h, since, reversed, fmt, std::move(flt), [&](const Value &x)  {
+						if (offset) {
+							offset--;
+							return true;
 						}
-						return --limit>0;
-					}
-				});
-
-				std::chrono::time_point<std::chrono::steady_clock> now = std::chrono::steady_clock::now();
-				if (!failed && now < abstm) {
-					std::size_t tm = std::chrono::duration_cast<std::chrono::milliseconds>(abstm-now).count();
-					SofaDB::WaitHandle wh = rdb->waitForChanges(h, since, tm, self);
-					if (!wh) {
-						self(true);
-					} else {
-						if (!nmap->updateNotify(ntfname, wh)) {
-							if (rdb->cancelWaitForChanges(wh)) {
-								req.setError(410,"canceled");
+						else {
+							if (!req.sendNotify(ntfname,x)) {
+								failed = true;
+								return false;
 							}
+							return --limit>0;
 						}
-					}
+					});
 				} else {
-					self(false);
+					if (!req.hearthbeat()) {
+						failed = true;
+					}
 				}
-			} else  {
-				req.setResult(Object("seq",since));
-				nmap->stopNotify(ntfname);
-
+				if (!failed) {
+					SofaDB::WaitHandle wh = rdb->waitForChanges(h, since, 60000, self);
+					if (wh) {
+						if (nmap->updateNotify(ntfname,wh)) {
+							return ;
+						}
+					} else {
+						self(true);
+						return ;
+					}
+				}
 			}
+			req.setResult(Object("seq",since));
+			nmap->stopNotify(ntfname);
+			return ;
 		};
 
 		observer(true);
@@ -410,7 +409,7 @@ void RpcAPI::databaseStopChanges(json::RpcRequest req) {
 	String id = req.getArgs()[0].toString();
 	SofaDB::WaitHandle wh = ntfmap->stopNotify(id);
 	if (wh == 0) req.setError(404,"not_found",id);
-	db->cancelWaitForChanges(wh);
+	db->cancelWaitForChanges(wh,true);
 	req.setResult(true);
 }
 
