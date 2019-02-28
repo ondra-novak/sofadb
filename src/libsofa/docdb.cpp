@@ -10,8 +10,10 @@
 #include <imtjson/binjson.tcc>
 #include <libsofa/docdb.h>
 #include <imtjson/fnv.h>
+#include <imtjson/operations.h>
 #include <imtjson/string.h>
 #include <libsofa/keyformat.h>
+#include <libsofa/merge.h>
 
 namespace sofadb {
 
@@ -148,6 +150,11 @@ PutStatus DocumentDB::loadDataConflictsLog(const json::Value &doc,
 	return PutStatus::stored;
 }
 
+RevID DocumentDB::calcRevisionID(json::Value data,json::Value conflicts, json::Value timestamp, json::Value deleted) {
+	RevID newRev;
+	Value({data, conflicts, timestamp, deleted}).serializeBinary(FNV1a<sizeof(RevID)>(newRev),0);
+	return newRev;
+}
 
 PutStatus DocumentDB::client_put(Handle h, const json::Value &doc, json::String &outrev) {
 
@@ -165,8 +172,7 @@ PutStatus DocumentDB::client_put(Handle h, const json::Value &doc, json::String 
 	st = loadDataConflictsLog(doc, &data, &conflicts,nullptr);
 	if (st != PutStatus::stored) return st;
 
-	RevID newRev;
-	Value({data, conflicts, rawdoc.timestamp, rawdoc.deleted}).serializeBinary(FNV1a<sizeof(RevID)>(newRev),0);
+	RevID newRev = calcRevisionID(data,conflicts,rawdoc.timestamp,rawdoc.deleted);
 	bool prevrev_ndefined = doc["rev"].getString().empty();
 
 	bool exists = core.findDoc(h,rawdoc.docId,prevdoc, tmp);
@@ -381,5 +387,111 @@ SeqNum DocumentDB::readChanges(Handle h, const SeqNum &since, bool reversed, Out
 
 }
 
+static Value mergeConflictLog(Value c1, Value c2) {
+	Array a;
+	a.addSet(c1);
+	a.addSet(c2);
+	Value v = a;
+	if (v.empty()) return json::undefined; else return v.sort(Value.compare).uniq();
+}
+
+static Value mergeConflictLog(Value c1, Value c2, Value revid) {
+	Array a;
+	a.addSet(c1);
+	a.addSet(c2);
+	a.add(revid);
+	Value v = a;
+	if (v.empty()) return json::undefined; else return v.sort(Value.compare).uniq();
+}
+
+static Value createConflictedRev(Value doc1, Value doc2) {
+	std::uint64_t tm1 = doc1["timestamp"].getUInt();
+	std::uint64_t tm2 = doc2["timestamp"].getUInt();
+	if (tm1 < tm2) std::swap(doc1,doc2);
+	Object res(doc1);
+	Value tm = DocumentDB::getTimestamp();
+	Value conflicts = mergeConflictLog(doc1["conflicts"],doc2["conflicts"],doc2["rev"]);
+	Value rev = DocumentDB::serializeStrRev(
+			DocumentDB::calcRevisionID(doc1["data"],conflicts,tm,doc1["deleted"])
+	);
+	Value log = Array(doc1["log"]).add(doc1["rev"]);
+	res("rev",rev)
+	   ("timestamp",timestamp)
+	   ("log",log)
+	   ("conflicts",conflicts);
+	return res;
+}
+
+static Value createMergedRev(Value doc1, Value doc2, Value mergedData,bool deleted) {
+	Object res(doc1);
+	Value tm = DocumentDB::getTimestamp();
+	Value conflicts = mergeConflictLog(doc1["conflicts"],doc2["conflicts"]);
+	Value rev = DocumentDB::serializeStrRev(
+			DocumentDB::calcRevisionID(mergedData,conflicts,tm,deleted)
+	);
+	Value log = Array(doc1["log"]).add(doc1["rev"]).add(doc2["rev"]);
+	res("rev",rev)
+	   ("timestamp",timestamp)
+	   ("log",log)
+	   ("conflicts",conflicts)
+	   ("data",mergedData)
+	   ("deleted",deleted?Value(true):Value());
+	return res;
+
+
+}
+
+
+json::Value DocumentDB::resolveConflict(Handle h, json::Value doc) {
+	std::string_view id = doc["id"].getString();
+	Value log = doc["log"];
+	Value data = doc["data"];
+	if (!log.defined() || !data.defined()) return nullptr;
+
+	Value mydoc = this->get(h,id,OutputFormat::data_and_log_and_deleted);
+	if (mydoc == nullptr) return mydoc;
+	Value myrev = mydoc["rev"];
+	if (log.indexOf(myrev) != Value::npos) return nullptr;
+	Value mydata = mydoc["data"];
+	Value mylog = mydoc["log"];
+	Value timestamp = getTimestamp();
+
+	//Simple merge per key
+	if (mydata.type() == json::object && data.type() == json::object) {
+		Value common = getCommonRev(h,id,log,mylog);
+		if (common != nullptr) {
+			Value cdata = common["data"];
+			Value diff1 = recursive_diff(cdata,mydata);
+			Value diff2 = recursive_diff(cdata,data);
+			Value merge = recursive_merge(diff1,diff2);
+			if (merge.defined()) {
+				Value m2 = recursive_apply(cdata, merge);
+				Array newlog;
+				newlog.add(doc["rev"]);
+				newlog.add(myrev);
+				newlog.addSet(log);
+				Object result(doc);
+				Value conflicts = mergeFlagArray(doc["conflicts"],mydoc["conflicts"]);
+				result.set("rev",serializeStrRev(calcRevisionID(m2,conflicts,timestamp,doc["deleted"])));
+				result.set("log",newlog);
+				result.set()
+				return result;
+			}
+		}
+	}
+	{
+		Value c1 = doc["conflicts"];
+		Value c2 = mydoc["conflicts"];
+		Value cc = (Array(c1).addSet(c2));
+		cc = cc.sort(Value::compare).uniq();
+		if (doc["timestamp"].getUInt()<mydoc["timestamp"].getUInt()) {
+			std::swap(doc, mydoc);
+		}
+		Object result(doc);
+		result.set("confli")
+
+	}
+
+}
 
 } /* namespace sofadb */

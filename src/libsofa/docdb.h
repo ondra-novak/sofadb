@@ -16,40 +16,6 @@
 
 namespace sofadb {
 
-enum class OutputFormat {
-	///return metadata only
-	metadata_only = 0,
-	///return user data
-	data = 1,
-	///return revision log
-	log = 2,
-	///return data and log
-	data_and_log = 3,
-	///also return deleted item
-	deleted = 4,
-	///return user data including deleted
-	data_and_deleted = 5,
-	///return revision log including deleted
-	log_and_deleted = 6,
-	///return everytjing
-	data_and_log_and_deleted = 7
-};
-
-enum class PutStatus {
-	stored, ///< put successful - document stored unaltered
-	merged,  ///< put successful - but document has been merged (top revision is different)
-	conflict, ///< conflict - cannot be merged
-	db_not_found, ///< database not found
-	error_id_must_be_string,
-	error_rev_must_be_string,
-	error_conflicts_must_be_array,
-	error_conflict_must_be_string,
-	error_deleted_must_be_bool,
-	error_timestamp_must_be_number,
-	error_data_is_manadatory,
-	error_log_is_mandatory,
-	error_log_item_must_be_string
-};
 
 struct PutStatus2Error {
 	PutStatus status;
@@ -157,6 +123,32 @@ public:
 	 * @return last sequence number. If zero is returned, then invalid handle or database is empty. If reversed is in efect, function returns lowest seqnum processed
 	 */
 	SeqNum readChanges(Handle h, const SeqNum &since, bool reversed, OutputFormat format, DocFilter &&flt, ResultCB &&cb);
+
+	///Resolves conflict
+	/**
+	 * @param h handle to database
+	 * @param doc document contains update of an document in database.
+	 * @return Return doc, if null is not conflicted. Returns merged version document if merge was successful. Returns conflicted version
+	 * of the document, if the merge was unsuccessful. Returns null, if document doesn't exists
+	 *
+	 * In other words, function resolves conflicts only if there are conflicts. The result document should be now submited successfully. However
+	 * because race condition can happedm the result document still can be in conflict, so function must be called again
+	 *
+	 * @note required log and data
+	 */
+	json::Value resolveConflict(Handle h, json::Value doc);
+
+	///Retrieves common revision from historical database
+	/**
+	 * @param h handle of database
+	 * @param id id of document
+	 * @param log1 log of first branch
+	 * @param log2 log of second branch
+	 * @return Function returns common revision if exists, or nullptr if doesn't exists
+	 */
+	json::Value getCommonRev(Handle h, std::string_view id, json::Value log1, json::Value log2);
+
+	static RevID calcRevisionID(json::Value data,json::Value conflicts, json::Value timestamp, json::Value deleted);
 
 	static std::uint64_t getTimestamp();
 

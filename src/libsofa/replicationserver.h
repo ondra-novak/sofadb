@@ -34,6 +34,13 @@ public:
 			std::function<void(const DownloadRequest &)> &&callback);
 	virtual void uploadDocs(const DocumentList &documents,
 			std::function<void(const PutStatusList &)> &&callback);
+	virtual void downloadDocs(const DownloadTopRequest &dwreq,
+				std::function<void(const DocumentList &)> &&callback);
+	virtual void uploadHistoricalDocs(const DocumentList &documents,
+			std::function<void(const PutStatusList&)> &&callback);
+	virtual void resolveConflicts(const DocumentList &documents,
+				std::function<void(const DocumentList &)> &&callback);
+
 
 protected:
 	DocumentDB docdb;
@@ -53,6 +60,8 @@ protected:
 			std::function<void(const Manifest &, SeqNum)> &&result);
 
 };
+
+extern ReplicationServer test;
 
 } /* namespace sofadb */
 

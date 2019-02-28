@@ -94,6 +94,33 @@ void ReplicationServer::downloadDocs(const DownloadRequest& dwreq,
 	callback(DocumentList(lst.data(),lst.size()));
 }
 
+void ReplicationServer::downloadDocs(const DownloadTopRequest& dwreq,
+		std::function<void(const DocumentList&)>&& callback) {
+	std::vector<json::Value> lst;
+	DatabaseCore &dbcore = docdb.getDBCore();
+	std::string tmp;
+
+	for (auto &&c : dwreq) {
+		DatabaseCore::RawDocument rawdoc;
+		if (dbcore.findDoc(h,c, rawdoc, tmp)) {
+			json::Value v = DocumentDB::parseDocument(rawdoc,OutputFormat::data_and_log_and_deleted);
+			lst.push_back(v);
+		}
+		else {
+			lst.push_back(nullptr);
+		}
+	}
+	callback(DocumentList(lst.data(),lst.size()));
+}
+
+void ReplicationServer::uploadHistoricalDocs(const DocumentList& documents,
+		std::function<void(const PutStatusList&)>&& callback) {
+	std::vector<PutStatus> st;
+	for (auto &&c: documents) {
+		st.push_back(docdb.replicator_put_history(h,c));
+	}
+	callback(PutStatusList(st.data(),st.size()));
+}
 
 void ReplicationServer::stopReadLk(Sync &_) {
 	std::condition_variable cond;
@@ -143,5 +170,18 @@ void ReplicationServer::uploadDocs(const DocumentList& documents,
 	callback(PutStatusList(st.data(),st.size()));
 
 }
+
+void ReplicationServer::resolveConflicts(const DocumentList &documents,
+				std::function<void(const DocumentList &)> &&callback) {
+
+	std::vector<json::Value> result;
+
+	for (auto &&doc: documents) {
+		json::Value v = docdb.resolveConflict(h,doc);
+		if (v != nullptr) result.push_back(v);
+	}
+	callback(DocumentList(result.data(),result.size()));
+}
+
 
 } /* namespace sofadb */

@@ -47,7 +47,6 @@ namespace sofadb {
  *
  */
 
-using ondra_shared::Future;
 
 class IReplicationProtocol {
 public:
@@ -64,6 +63,7 @@ public:
 
 
 	using DownloadRequest = std::basic_string_view<DocRef>;
+	using DownloadTopRequest = std::basic_string_view<std::string>;
 	using Manifest = std::basic_string_view<DocRef>;
 	using DocumentList = std::basic_string_view<json::Value>;
 	using PutStatusList = std::basic_string_view<PutStatus>;
@@ -104,6 +104,16 @@ public:
 	virtual void downloadDocs(const DownloadRequest &dwreq,
 			std::function<void(const DocumentList &)> &&callback) = 0;
 
+	///Downloads top level versions of the documents
+	/**
+	 * Used to download current revision of documents for merge
+	 *
+	 * @param dwreq request contains list of documents to download
+	 * @param callback function is called when operation completes. If this argument is empty,
+	 * there is error reported
+	 */
+	virtual void downloadDocs(const DownloadTopRequest &dwreq,
+			std::function<void(const DocumentList &)> &&callback) = 0;
 
 	///Stops reading from the source database
 	virtual void stopRead() = 0;
@@ -125,6 +135,30 @@ public:
 	 */
 	virtual void uploadDocs(const DocumentList &documents,
 			std::function<void(const PutStatusList &)> &&callback) = 0;
+
+	///Uploads docs to store in historical database
+	/**
+	 * It is used to store conflicted revision on the target before it is merged. These documents are stored in history and never shows up as top level
+	 *
+	 * @param documents documents to store
+	 * @param callback callback function
+	 */
+	virtual void uploadHistoricalDocs(const DocumentList &documents,
+			std::function<void(const PutStatusList&)> &&callback) = 0;
+
+
+	///Requests to resolve conflicts on documents
+	/**
+	 * @param documents list of documents containing top-level documents on the other side.
+	 * @param callback function called with resolved documents. Resolved documents should mention local top-level document and received document
+	 * in log record. It is also possible put one of the documents to conflict record and keep document conflicted. The returned
+	 * documents are uploaded to other side. If the upload fails with conflict, operation can repeat with new set of documents
+	 *
+	 * Conflict resolution is not stored, it only uses data of local database to resolve conflict
+	 */
+	virtual void resolveConflicts(const DocumentList &documents,
+				std::function<void(const DocumentList &)> &&callback) = 0;
+
 
 	virtual ~IReplicationProtocol() {}
 };
