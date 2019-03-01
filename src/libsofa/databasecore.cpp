@@ -924,5 +924,9 @@ void DatabaseCore::loadDB(Iterator &iter) {
 	}
 }
 
+DatabaseCore::Lock DatabaseCore::lockWrite(Handle h) {
+	return Lock(getDatabaseState(h));
+}
+
 
 } /* namespace sofadb */

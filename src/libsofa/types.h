@@ -32,8 +32,9 @@ enum class OutputFormat {
 	///return revision log including deleted
 	log_and_deleted = 6,
 	///return everytjing
-	data_and_log_and_deleted = 7
+	replication = 7
 };
+
 
 enum class PutStatus {
 	stored, ///< put successful - document stored unaltered
@@ -50,6 +51,8 @@ enum class PutStatus {
 	error_log_is_mandatory,
 	error_log_item_must_be_string
 };
+
+inline bool isSuccess(PutStatus st) {return st == PutStatus::stored || st == PutStatus::merged;}
 
 
 }

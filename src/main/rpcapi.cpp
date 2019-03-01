@@ -371,11 +371,13 @@ void RpcAPI::documentPut(json::RpcRequest req) {
 	for (std::uintptr_t i = 1; i < cnt ; i++) {
 
 		Value doc = args[i];
-		String newrev;
+		Value newrev;
 		PutStatus st = db->put(h,doc,newrev);
-		if (st == PutStatus::stored) {
-			result.push_back(Object("id",doc["id"])
-								   ("rev",newrev));
+		if (isSuccess(st)) {
+			Object res;
+			res("id",doc["id"])
+			   ("rev",newrev);
+			result.push_back(res);
 
 		} else {
 			Object err(statusToError(st));

@@ -63,7 +63,7 @@ public:
 	 *
 	 * @caller can open batch at DatabaseCore if it need to put documents atomically
 	 */
-	PutStatus client_put(Handle h, const json::Value &doc, json::String &rev);
+	PutStatus client_put(Handle h, const json::Value &doc, json::Value &rev);
 	///Puts replicated d1ocument
 	/**
 	 * The replicated document contains rev which have its actual revision. It must
@@ -71,9 +71,11 @@ public:
 	 * have timestamp
 	 *
 	 * @param doc document to put
+	 * @param rev stores revision of the document. However if the result is "merged" it stores
+	 *   revision of merged result
 	 * @return status
 	 */
-	PutStatus replicator_put(Handle h, const json::Value &doc);
+	PutStatus replicator_put(Handle h, const json::Value &doc, json::String &rev);
 	///Puts document to the history.
 	/** The document is stored as history, doesn't change current top
 	 *
@@ -126,27 +128,49 @@ public:
 
 	///Resolves conflict
 	/**
+	 *
+	 * Resolves conflict by merging document with content of the databse. The result document can be safely put into the
+	 * database without conflicts. Function can be also used to make merge of current revision and external revision to
+	 * solve conflict in replication
+	 *
 	 * @param h handle to database
-	 * @param doc document contains update of an document in database.
-	 * @return Return doc, if null is not conflicted. Returns merged version document if merge was successful. Returns conflicted version
-	 * of the document, if the merge was unsuccessful. Returns null, if document doesn't exists
+	 * @param doc external or new document, must contain data, deleted status and revision log
+	 * @param merged value receives merged document. If the result is false, then this value can be set to undefined or valid json.
+	 *    In case of valid json, the value contains partially merged document in conflicted state;
+	 * @retval true success, documents has been merged
+	 * @retval false merge was not succesfull. If the merged value is undefined, that error happened, otherwise conflict happened
 	 *
-	 * In other words, function resolves conflicts only if there are conflicts. The result document should be now submited successfully. However
-	 * because race condition can happedm the result document still can be in conflict, so function must be called again
 	 *
-	 * @note required log and data
 	 */
-	json::Value resolveConflict(Handle h, json::Value doc);
+	bool resolveConflict(Handle h, json::Value doc, json::Value &merged);
 
 	///Retrieves common revision from historical database
 	/**
+	 *
 	 * @param h handle of database
 	 * @param id id of document
 	 * @param log1 log of first branch
 	 * @param log2 log of second branch
 	 * @return Function returns common revision if exists, or nullptr if doesn't exists
 	 */
-	json::Value getCommonRev(Handle h, std::string_view id, json::Value log1, json::Value log2);
+	json::Value findBaseDocument(Handle h, std::string_view id, json::Value log1, json::Value log2);
+
+	///Merges 3-way data
+	/**TBD - can be scripted, This is the reason, why handle is passed.
+	 *
+	 * @param h handle to database
+	 * @param left_data data part of left revision
+	 * @param right_data data part of right revision
+	 * @param base_data data part of base revision
+	 * @param conflicted stores status about conflict. If there were conflict, variable is set to true.
+	 * Conflicted items are resolved using right_data as result for particular item
+	 * @return return merged content
+	 */
+	json::Value merge3way(Handle h, json::Value left_data, json::Value right_data, json::Value base_data, bool &conflicted);
+
+	///Converts document sent by client without log to document containing log, timestamp and revision
+	static json::Value convertClientPut2ReplicatorPut(json::Value doc);
+
 
 	static RevID calcRevisionID(json::Value data,json::Value conflicts, json::Value timestamp, json::Value deleted);
 
@@ -161,6 +185,7 @@ public:
 	static json::Value parseLog(std::string_view &payload);
 
 	DatabaseCore &getDBCore() {return core;}
+
 protected:
 	DatabaseCore &core;
 

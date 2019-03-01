@@ -130,17 +130,19 @@ public:
 	 * creating separate branch. The only way to close that branch is to put new revision to top
 	 * of revision
 	 */
-	PutStatus put(Handle db, const json::Value &doc, json::String &newrev);
+	PutStatus put(Handle db, const json::Value &doc, json::Value  &newrev);
 	///Replicates document from other database
 	/**
 	 * @param db database handle
 	 * @param doc document from other database. It must have revision log
-	 * @param history set true to store document to the history - this doesn't change current top document
 	 * @return  if 'stored' returned, then document has been stored otherwise it can contain 'conflict' or
 	 *   other error.
 	 *
 	 */
-	PutStatus replicatorPut(Handle db, const json::Value &doc, bool history);
+	PutStatus replicatorPut(Handle db, const json::Value &doc, json::String &newrev);
+
+	PutStatus replicatorPutHistory(Handle db, const json::Value &doc);
+
 	///Retrieves document from the database
 	/**
 	 * @param h handle to database
@@ -167,7 +169,7 @@ public:
 	 * @param revid revision id
 	 *
 	 */
-	PutStatus erase(Handle h, const std::string_view &docid, const std::string_view &revid);
+	PutStatus erase(Handle h, const std::string_view &docid, const std::string_view &revid, json::Value &outrev);
 
 	///Purges historical revision
 	void purge(Handle h, const std::string_view &docid, const std::string_view &revid);

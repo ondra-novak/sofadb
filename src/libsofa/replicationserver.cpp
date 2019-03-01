@@ -44,7 +44,7 @@ void ReplicationServer::readManifestLk(SeqNum since, std::size_t limit,
 		if (flt != nullptr) {
 			DatabaseCore::RawDocument rawdoc;
 			if (!dbcore.findDoc(h,chrec.docid, chrec.revid, rawdoc, tmp)) return true;
-			json::Value doc = DocumentDB::parseDocument(rawdoc,OutputFormat::data_and_log_and_deleted);
+			json::Value doc = DocumentDB::parseDocument(rawdoc,OutputFormat::replication);
 			if (!flt(doc).defined()) return true;
 		}
 		docs.push_back(DocRef(std::string(chrec.docid),chrec.revid));
@@ -84,7 +84,7 @@ void ReplicationServer::downloadDocs(const DownloadRequest& dwreq,
 	for (auto &&c : dwreq) {
 		DatabaseCore::RawDocument rawdoc;
 		if (dbcore.findDoc(h,c.id, c.rev, rawdoc, tmp)) {
-			json::Value v = DocumentDB::parseDocument(rawdoc,OutputFormat::data_and_log_and_deleted);
+			json::Value v = DocumentDB::parseDocument(rawdoc,OutputFormat::replication);
 			lst.push_back(v);
 		}
 		else {
@@ -103,7 +103,7 @@ void ReplicationServer::downloadDocs(const DownloadTopRequest& dwreq,
 	for (auto &&c : dwreq) {
 		DatabaseCore::RawDocument rawdoc;
 		if (dbcore.findDoc(h,c, rawdoc, tmp)) {
-			json::Value v = DocumentDB::parseDocument(rawdoc,OutputFormat::data_and_log_and_deleted);
+			json::Value v = DocumentDB::parseDocument(rawdoc,OutputFormat::replication);
 			lst.push_back(v);
 		}
 		else {
@@ -164,8 +164,9 @@ void ReplicationServer::uploadDocs(const DocumentList& documents,
 						std::function<void(const PutStatusList&)>&& callback) {
 
 	std::vector<PutStatus> st;
+	json::String dummy;
 	for (auto &&c: documents) {
-		st.push_back(docdb.replicator_put(h,c));
+		st.push_back(docdb.replicator_put(h,c,dummy));
 	}
 	callback(PutStatusList(st.data(),st.size()));
 
@@ -177,8 +178,10 @@ void ReplicationServer::resolveConflicts(const DocumentList &documents,
 	std::vector<json::Value> result;
 
 	for (auto &&doc: documents) {
-		json::Value v = docdb.resolveConflict(h,doc);
-		if (v != nullptr) result.push_back(v);
+		json::Value merged;
+		docdb.resolveConflict(h,doc,merged);
+		if (merged.defined())
+			result.push_back(merged);
 	}
 	callback(DocumentList(result.data(),result.size()));
 }

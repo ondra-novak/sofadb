@@ -69,7 +69,7 @@ json::Value recursive_merge(json::Value a, json::Value b) {
 		if (a.type() == json::object && b.type() == json::object) {
 			Value res = recursive_merge(a,b);
 			if (res.defined()) out(a.getKey(),res);
-			conflict = true;
+			else conflict = true;
 		} else if (a != b) {
 			conflict = true;
 		}
@@ -77,6 +77,26 @@ json::Value recursive_merge(json::Value a, json::Value b) {
 	if (conflict) return Value();
 	return out.commitAsDiff();
 }
+
+
+json::Value recursive_force_merge(json::Value a, json::Value b, bool &conflicted) {
+	Object out;
+	conflicted = false;
+	merge_template(a, b, setFn, setFn ,[&](const Value &a, const Value &b, Object &out) {
+		if (a.type() == json::object && b.type() == json::object) {
+			bool c;
+			Value res = recursive_force_merge(a,b,c);
+			conflicted = conflicted || c;
+			out.set(a.getKey(),res);
+		} else if (a != b) {
+			out.set(b);
+			conflicted = true;
+		}
+	},out);
+	return out.commitAsDiff();
+
+}
+
 
 json::Value recursive_apply(json::Value base, json::Value diff) {
 	Object out;

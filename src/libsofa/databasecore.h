@@ -147,6 +147,8 @@ private:
 		Info *operator->() {return ptr;}
 		bool operator==(nullptr_t) const {return ptr == nullptr;}
 		bool operator!=(nullptr_t) const {return ptr != nullptr;}
+		PInfo &operator=(const PInfo &other) {if (ptr) ptr->lock.unlock(); ptr = other.ptr;if (ptr) ptr->lock.lock();return *this;}
+		PInfo &operator=(PInfo &&other) {if (ptr) ptr->lock.unlock(); ptr = other.ptr;other.ptr = nullptr;return *this;}
 	};
 
 
@@ -201,6 +203,12 @@ public:
 		std::string_view docid;
 	};
 
+	class Lock {
+		PInfo state;
+	public:
+		Lock(PInfo state):state(state) {}
+		void unlock() {state = nullptr;}
+	};
 
 
 	///Opens batch write for the database
@@ -505,6 +513,8 @@ public:
 
 	bool cleanHistory(Handle h, const std::string_view &docid);
 
+	///Prevents writes to other threads while the lock is held
+	Lock lockWrite(Handle h);
 
 protected:
 

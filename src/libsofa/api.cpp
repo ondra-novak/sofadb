@@ -77,18 +77,19 @@ bool SofaDB::allDocs(Handle db, OutputFormat outputFormat,
 	return docdb.listDocs(db, start_key, end_key,outputFormat,std::move(cb));
 }
 
-PutStatus SofaDB::put(Handle db, const json::Value& doc, json::String &newrev) {
+PutStatus SofaDB::put(Handle db, const json::Value& doc, json::Value &newrev) {
 	auto st = docdb.client_put(db,doc, newrev);
 	return st;
 }
 
-PutStatus SofaDB::replicatorPut(Handle db, const json::Value& doc,	bool history) {
-	if (history) {
-		return docdb.replicator_put_history(db, doc);
-	} else {
-		return docdb.replicator_put(db, doc);
-	}
+PutStatus SofaDB::replicatorPut(Handle db, const json::Value& doc, json::String &newrev) {
+	return docdb.replicator_put(db, doc,newrev);
 }
+
+PutStatus SofaDB::replicatorPutHistory(Handle db, const json::Value &doc) {
+	return docdb.replicator_put_history(db, doc);
+}
+
 
 json::Value SofaDB::get(Handle h, const std::string_view& id, OutputFormat format) {
 	return docdb.get(h,id,format);
@@ -98,13 +99,12 @@ json::Value SofaDB::get(Handle h, const std::string_view& id, const std::string_
 	return docdb.get(h,id,rev,format);
 }
 
-PutStatus SofaDB::erase(Handle h, const std::string_view& docid, const std::string_view& revid) {
+PutStatus SofaDB::erase(Handle h, const std::string_view& docid, const std::string_view& revid, json::Value &outrev) {
 	json::Value v = Object("id",StrViewA(docid))
 						("rev",StrViewA(revid))
 						("deleted",true)
 						("value",nullptr);
-	String s;
-	return put(h, v, s);
+	return put(h, v, outrev);
 }
 
 void SofaDB::purge(Handle h, const std::string_view& docid,	const std::string_view& revid) {
