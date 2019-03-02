@@ -1,5 +1,7 @@
 ## RPC Commands
 
+
+
 ### DB.create 
 
 Creates database. 
@@ -130,7 +132,147 @@ The configuration object
 * **limit** - limit of returned results
 * **offset** - count of records to skip
 * **timeout** - if timeout set, the function will wait for max amout timeout (in milliseconds) for the first change. 
-* **notify** - specifies name of JSONRPC notification which will be used to deliver changes to the client. In this case **timeout** specifies total time of running function,
-it doesn't stop on the first record. The string must be unique on the server, otherwise,
-the function can return 409 conflict.
-* **
+* **notify** - specifies name of JSONRPC notification which will be used to deliver changes to the client. In this case **timeout** is ignored. It doesn't stop on the first record. The string must be unique on the server, otherwise, the function can return 409 conflict. To stop this function, use **DB.stopChanges**
+* **filter** - specifies filtes, see **filter definition**
+
+### DB.stopChanges
+
+Stops receiving changes 
+
+```
+DB.stopChanges["notify_name"]
+```
+
+Function terminates pending **DB.changes** command in notification mode. The argument contains name of the notification. The pending **DB.changes** returns with last processed sequence number.
+
+Function returns **true**
+
+### Doc.put
+
+Puts document(s) to the database
+
+```
+Doc.put["database_name",{... document update...},...]
+```
+
+Function puts document to the database specified by **database_name** as first argument. Second and 
+other arguments can contains documents. See [document layout](document_layout.md) for more informations.
+
+**Function returns** array, where each item corresponds to an item in the request, There can be two forms of the result
+
+#### Success
+
+``` 
+{
+	"id": "document_id",
+	"rev": "document_revision"
+}
+```
+If the document has been merged (because there were solvable conflict), the function returns two revisions
+``` 
+{
+	"id": "document_id",
+	"rev": ["document_revision","merged_revision"]
+}
+```
+The first revision is revision of created document. Any future update can refer this revision, but it will always in conflict with current head revision and merged. The second revision is new head revision. You should use head revision to update your internal state of the document and for future modifications use this revision to avoid future conflicts and merges.
+
+#### Failure
+
+```
+{
+"code":	<code>,
+"error": true,
+"id":	"document_id",
+"message":	"description"
+}
+```
+
+The failure item has always **error** field set to **true**. The **code** contains code of error and **message** contains human readable description
+
+Most common code - **409** - conflict - means, that update of the document cannot be merged. This can be due various reason.
+ - Revision ID doesn't refer correct revision
+ - Revision ID refers revision which is no longer available
+ - Merge conflict - The one of modified fields has been also modified in the other update
+ 
+ 
+### Doc.get
+
+Reads document(s} from database
+
+```
+Doc.get ["database_name", <doc_spec>,...]
+```
+
+Reads one or multiple documents from the database. The **doc_spec** can be either **string** or **object**.
+
+- **string** - contains document id to read. The function returns head revision if the document exists and it is not deleted. 
+- **object** - offers more options
+
+```
+{
+	"id":  (string, optional),
+	"rev":  (string, optional),
+	"log":  (boolean, optional),
+	"data":  (boolean, optional),
+	"deleted":   (boolean, optional),
+	"prefix":   (string, optional),
+	"start_key":   (string, optional),
+	"end_key:   (string, optional),
+	"offset:   (number, optional),
+	"limit:   (number, optional),
+	"descending:  (boolean, optional)
+}
+```
+
+Function can return either single document or list of document. If object contains **id** the single document will be returned. If the objct contains **prefix** or **start_key** and **end_key**, then list of documents will be returned. If the object contains none of above of keys, the
+other fields just modifies output format for all items following this object
+
+- **log** - if set to **true**, the revision log is included to each document
+- **data** - if set to **true** then the data are included to each document. This is default value, so you can use **data** to set **false** if you don't need data
+- **deleted** - if set to false (default), deleteded documents are not available and hidden. Request for deleted document results to error. If set to true, then deleted documents are also visible and contain **deleted:true** field
+- **id** - specifies document id to retrieve
+- **rev** - revision to retrieve. If the field missing then head revision is retrieved
+- **prefix** - allows to retrieve list of documents starting by the prefix. Use "" to retrieve all documents
+- **start_key** - allows to retrieve list of documents starting by the given id
+- **end_key** - specifies end key of the range where first key is defined using **start_key**. The **end_key** is always exluded. If the **end_key** is ordered before **start_key**, then descending
+list is returned
+- **descending** - used along with **prefix** allows ti retrieve descending list
+- **offset** - offset in list
+- **limit** - limits count of items in list  
+
+
+### Doc.changes
+
+Reads document's history
+
+```
+Doc.changes ["database_name", "document_id",{... cfg ...} ]
+```
+
+Configuration is optional
+
+```
+{
+	"log":  (boolean, optional),
+	"data":  (boolean, optional),
+	"deleted":   (boolean, optional),
+	"since":   (number, optional),
+	"offset:   (number, optional),
+	"limit:   (number, optional),
+	"descending:  (boolean, optional)
+}
+```
+
+- **log** - if set to **true**, the revision log is included to each document
+- **data** - if set to **true** then the data are included to each document. 
+- **deleted** - if set to false, deleted documents are not available and hidden. Request for deleted document results to error. If set to true (true), then deleted documents are also visible and contain **deleted:true** field
+- **since** - retrieves revisions after given timestamp (in milliseconds from epoch). If missing, all revisions are returned
+- **descending** - returns list descending (starting by most recent revision)
+- **offset** - offset in list
+- **limit** - limits count of items in list
+
+  
+ 
+
+ 
