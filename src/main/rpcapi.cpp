@@ -29,6 +29,7 @@ void RpcAPI::init(json::RpcServer& server) {
 	server.add("DB.stopChanges",this,&RpcAPI::databaseStopChanges);
 	server.add("Doc.put",this,&RpcAPI::documentPut);
 	server.add("Doc.get",this,&RpcAPI::documentGet);
+	server.add("Doc.changes",this,&RpcAPI::documentChanges);
 }
 
 void RpcAPI::databaseCreate(json::RpcRequest req) {
@@ -423,5 +424,48 @@ SofaDB::WaitHandle RpcAPI::NotifyMap::stopNotify(json::String notifyName) {
 	notifyMap.erase(iter);
 	return wh;
 }
+
+void RpcAPI::documentChanges(json::RpcRequest req) {
+	static Value argformat = {
+			{"string","number"},
+			"string",
+			{"undefined",Object
+					("log",{"boolean","undefined"})
+					("deleted",{"boolean","undefined"})
+					("data",{"boolean","undefined"})
+					("since",{"number","undefined"})
+					("offset",{"number","undefined"})
+					("limit",{"number","undefined"})
+					("descending",{"boolean","undefined"})
+			}
+	};
+
+	Value args = req.getArgs();
+	if (!req.checkArgs(argformat)) return req.setArgError();
+
+	DatabaseCore::Handle h;
+	if (!arg0ToHandle(req,h)) return;
+
+	Value cfg = args[2];
+	std::size_t since = cfg["since"].getUInt();
+	OutputFormat fmt = getOutputFormat(OutputFormat::deleted, cfg);
+	std::size_t offset = getOffset(cfg["offset"]);
+	std::size_t limit = getLimit(cfg["limit"]);
+	bool reverse = cfg["descending"].getBool();
+
+	Array result;
+
+	db->readDocChanges(h,args[1].getString(), since, reverse, fmt, [&](Value v) {
+		if (offset) {
+			--offset;
+			return true;
+		} else {
+			result.push_back(v);
+			return --limit > 0;
+		}
+	});
+	req.setResult(result);
+}
+
 } /* namespace sofadb */
 

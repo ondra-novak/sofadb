@@ -25,14 +25,14 @@ json::Value mergeLogs(json::Value logitem, Args&& ... args) {
 
 	json::Array coll;
 	mergeLogs2(coll, logitem, std::forward<Args>(args)...);
-	coll.reverse();
 
-	std::unordered_set<json::Value> c;
+	std::unordered_set<std::string_view> c;
 
 	return json::Value(coll).filter(
 			[&](json::Value v) {
-		if (c.find(v) == c.end()) {
-			c.insert(v);
+		std::string_view str = v.getString();
+		if (c.find(str) == c.end()) {
+			c.insert(str);
 			return true;
 		} else {
 			return false;

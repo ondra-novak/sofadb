@@ -15,6 +15,7 @@
 #include <imtjson/string.h>
 #include <libsofa/keyformat.h>
 #include <libsofa/merge.h>
+#include <shared/logOutput.h>
 #include "merge_logs.h"
 
 namespace sofadb {
@@ -65,6 +66,18 @@ std::uint64_t DocumentDB::getTimestamp() {
 	);
 	return ms.count();
 }
+
+json::Value DocumentDB::parseStrRevArr(const json::Value &arr) {
+	return arr.map([&](Value x) {
+		return parseStrRev(x.getString());
+		});
+}
+json::Value DocumentDB::serializeStrRevArr(const json::Value &arr){
+	return arr.map([&](Value x) {
+		return serializeStrRev(x.getUInt());
+		});
+}
+
 
 DocumentDB::DocumentDB(DatabaseCore& core):core(core) {
 }
@@ -127,6 +140,7 @@ PutStatus DocumentDB::json2rawdoc(const json::Value &doc, DatabaseCore::RawDocum
 	rawdoc.revision = rev;
 	rawdoc.timestamp = timestamp;
 	rawdoc.version = 0;
+	rawdoc.seq_number = 0;
 	return PutStatus::stored;
 }
 
@@ -191,6 +205,7 @@ PutStatus DocumentDB::client_put(Handle h, const json::Value &doc, json::Value &
 	if (st == PutStatus::merged) {
 		outrev = {outrev,  mergerev};
 	}
+	return st;
 
 /*	DatabaseCore::RawDocument rawdoc;
 	DatabaseCore::RawDocument prevdoc;
@@ -300,8 +315,10 @@ PutStatus DocumentDB::replicator_put(Handle h, const json::Value &doc, json::Str
 			for (Value c:hst) hl.push_back(c.getUInt());
 		}
 		newhst = Value(hl).slice(0,core.getMaxLogSize(h));
+	} else {
+		newhst = parseStrRevArr(log);
 	}
-	serializePayload(newhst, conflicts, data, tmp);
+	serializePayload(newhst, parseStrRevArr(conflicts), data, tmp);
 	rawdoc.payload = tmp;
 	core.storeUpdate(h,rawdoc);
 	tmp.clear();
@@ -327,7 +344,7 @@ PutStatus DocumentDB::replicator_put_history(Handle h, const json::Value &doc) {
 
 	if (core.findDoc(h, rawdoc.docId, rawdoc.revision,prevdoc, tmp)) return PutStatus::stored;
 
-	serializePayload(log, conflicts, data, tmp);
+	serializePayload(parseStrRevArr(log), parseStrRevArr(conflicts), data, tmp);
 	rawdoc.payload = tmp;
 	core.storeToHistory(h, rawdoc);
 	return PutStatus::stored;
@@ -338,6 +355,8 @@ json::Value DocumentDB::parseLog(std::string_view &payload) {
 		Value log = Value::parseBinary(JsonSource(payload), base64);
 		return log;
 }
+
+
 
 
 Value DocumentDB::parseDocument(const DatabaseCore::RawDocument& doc, OutputFormat format) {
@@ -360,24 +379,15 @@ Value DocumentDB::parseDocument(const DatabaseCore::RawDocument& doc, OutputForm
 		std::string_view p = doc.payload;
 		Value log = parseLog(p);
 		if (format == OutputFormat::data) {
-			Value conflicts = Value::parseBinary(JsonSource(p), base64);
+			Value conflicts = serializeStrRevArr(Value::parseBinary(JsonSource(p), base64));
 			Value data = Value::parseBinary(JsonSource(p),base64);
 
-			Array c;
-			for (Value v:conflicts) {
-				c.push_back(serializeStrRev(v.getUInt()));
-			}
-
 			jdoc.set("data", data);
-			if (!c.empty())
-				jdoc.set("conflicts",c);
+			if (!conflicts.empty())
+				jdoc.set("conflicts",conflicts);
 		}
 		if (format == OutputFormat::log) {
-			Array c;
-			for (Value v:log) {
-				c.push_back(serializeStrRev(v.getUInt()));
-			}
-			jdoc.set("log",c);
+			jdoc.set("log",serializeStrRevArr(log));
 		}
 	}
 	return jdoc;
@@ -501,7 +511,8 @@ bool DocumentDB::resolveConflict(Handle h, json::Value newdoc, json::Value &merg
 	if (basedoc != nullptr) {
 		data = merge3way(h, olddoc_data, newdoc_data,basedoc["data"],conflicted);
 	} else {
-		data = newdoc;
+		conflicted = true;
+		data = newdoc["data"];
 	}
 
 	Array a_conflicts;
@@ -539,10 +550,32 @@ bool DocumentDB::resolveConflict(Handle h, json::Value newdoc, json::Value &merg
 }
 
 json::Value DocumentDB::findBaseDocument(Handle h, std::string_view id, json::Value log1, json::Value log2) {
+	std::size_t a = 0, pos1 = Value::npos,pos2 = Value::npos;
 	for (Value c: log1) {
-		if (log2.indexOf(c) != Value::npos) {
+		std::size_t x = log2.indexOf(c);
+		if (x != Value::npos) {
+			pos2 = x;
+			pos1 = a;
 			Value doc = get(h,id,c.getString(), OutputFormat::replication);
 			if (doc != nullptr) return doc;
+		}
+		++a;
+	}
+	if (pos2 != Value::npos) {
+		Value l1 = log1.slice(pos1);
+		Value l2 = log2.slice(pos2);
+		std::size_t cnt = std::max(l1.size(),l2.size());
+		for (std::size_t i = 0; i < cnt; i++) {
+			Value a = l1[i];
+			Value b = l2[i];
+			if (a.defined()) {
+				Value doc = get(h,id,a.getString(), OutputFormat::replication);
+				if (doc != nullptr) return doc;
+			}
+			if (b.defined()) {
+				Value doc = get(h,id,b.getString(), OutputFormat::replication);
+				if (doc != nullptr) return doc;
+			}
 		}
 	}
 	return nullptr;

@@ -30,6 +30,9 @@ protected:
 	PEventRouter router;
 	EventRouter::ObserverHandle oh;
 
+	static bool init_rev_map(DatabaseCore &dbcore,
+			DatabaseCore::RevMap &revision_map,
+			Handle h, const std::string_view &id);
 
 
 	DatabaseCore &dbcore;

@@ -796,7 +796,7 @@ struct HistStat {
 	SeqNum sq;
 };
 
-bool DatabaseCore::cleanHistory(Handle h, const std::string_view &docid) {
+bool DatabaseCore::cleanHistory(Handle h, const std::string_view &docid, const RevMap &revision_map) {
 
 	RawDocument topdoc;
 	std::string key;
@@ -815,8 +815,15 @@ bool DatabaseCore::cleanHistory(Handle h, const std::string_view &docid) {
 	while (iter.getNext()) {
 		HistStat h;
 		extract_from_key(iter->first, key.length()+2, h.rev);
-		extract_value(iter->second, h.sq, h.tm);
-		hs.push_back(h);
+		auto iter2 = revision_map.find(h.rev);
+		if (iter2 == revision_map.end()) {
+			todel.push_back(h.rev);
+		} else {
+			extract_value(iter->second, h.sq, h.tm);
+			if (iter2->second == false) {
+				hs.push_back(h);
+			}
+		}
 	}
 
 	auto sortfn = [](const HistStat &a, const HistStat &b) {

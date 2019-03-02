@@ -162,6 +162,17 @@ public:
 	 */
 	json::Value get(Handle h, const std::string_view &id, const std::string_view &rev, OutputFormat format);
 
+
+	///Reads historical changes on specified document
+	/**
+	 * @param h
+	 * @param since
+	 * @param reversed
+	 * @param format
+	 * @param callback
+	 */
+	void readDocChanges(Handle h, const std::string_view &id, Timestamp since, bool reversed,OutputFormat format, ResultCB &&callback);
+
 	///Erases document (sets is deleted)
 	/**
 	 * @param h handle to database

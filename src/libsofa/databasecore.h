@@ -68,7 +68,7 @@ public:
 		/** Default value is 2, so total 3 revisions are stored. One current and two historical. They are
 		 * kept stored even if they are older than history_max_age
 		 */
-		std::size_t history_min_count = 2; //keep 2 older revisions
+		std::size_t history_min_count = 3; //keep 3 older revisions
 		///specifies max limit of total stored revisions. This number must be above or equal to history_min_count
 		/** This affects, how old revision will be removed
 		 * First, all revisions above history_min_count and older than history_max_age are deleted.
@@ -79,7 +79,7 @@ public:
 		 * This number reduces count of historical revisions without loosing ability to perform 3-way merge
 		 * with any conflicted revision which immediate parent revision is no longer available.
 		 */
-		std::size_t history_max_count = 3; //keep max 2 older revisions
+		std::size_t history_max_count = 8; //keep max 8 older revisions
 		///Definex maximum count of old revisions for deleted documents
 		/** Default value 0 means, that no older revision is stored, just tombstone, everything older is deleted. T
 		 * This doesn't affect merge ability because deleted document is always winner unless there is update
@@ -510,8 +510,19 @@ public:
 
 	std::size_t getMaxLogSize(Handle h) ;
 
+	using RevMap = std::unordered_map<RevID, bool>;
 
-	bool cleanHistory(Handle h, const std::string_view &docid);
+	///Clears history
+	/**
+	 * @param h handle to database
+	 * @param docid document id
+	 * @param revision_map contains map of relevant revisions. Revisions not included in
+	 * 	this map are deleted. Revisions included in this map may be saved. If the
+	 * 	revision is marked with true (as value in map), the revision is always saved.
+	 * 	Other revisions are saved only if they are not too old depend on database configuration
+	 * @return
+	 */
+	bool cleanHistory(Handle h, const std::string_view &docid, const RevMap &revision_map);
 
 	///Prevents writes to other threads while the lock is held
 	Lock lockWrite(Handle h);

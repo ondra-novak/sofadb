@@ -32,6 +32,8 @@ public:
 	void databaseStopChanges(json::RpcRequest req);
 	void documentGet(json::RpcRequest req);
 	void documentPut(json::RpcRequest req);
+	void documentChanges(json::RpcRequest req);
+
 
 protected:
 	PSofaDB db;

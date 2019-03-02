@@ -149,5 +149,29 @@ bool SofaDB::cancelWaitForChanges(WaitHandle wh, bool notify_fn) {
 PEventRouter SofaDB::getEventRouter() {
 	return eventRouter;
 }
+void SofaDB::readDocChanges(Handle h, const std::string_view &id, Timestamp since, bool reversed,OutputFormat format, ResultCB &&callback) {
+	std::vector<std::pair<std::size_t,Value> > list;
+	dbcore.enumAllRevisions(h,id,[&](const DatabaseCore::RawDocument &rawdoc){
+		if (rawdoc.timestamp > since) {
+			list.push_back(std::pair(rawdoc.timestamp,docdb.parseDocument(rawdoc,format)));
+		}
+	});
+
+	if (reversed) {
+		std::sort(list.begin(),list.end(), [&](auto &&a, auto &&b) {
+			return a.first > b.first;
+		});
+	} else {
+		std::sort(list.begin(),list.end(), [&](auto &&a, auto &&b) {
+			return a.first < b.first;
+		});
+	}
+
+	for (auto &&c: list) {
+		if (!callback(c.second)) break;
+	}
+}
+
+
 }
 

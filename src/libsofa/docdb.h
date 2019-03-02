@@ -27,6 +27,9 @@ struct PutStatus2Error {
 inline OutputFormat operator|(OutputFormat a, OutputFormat b) {
 	return static_cast<OutputFormat>(static_cast<int>(a) |  static_cast<int>(b));
 }
+inline OutputFormat operator+(OutputFormat a, OutputFormat b) {
+	return static_cast<OutputFormat>(static_cast<int>(a) |  static_cast<int>(b));
+}
 inline OutputFormat operator&(OutputFormat a, OutputFormat b) {
 	return static_cast<OutputFormat>(static_cast<int>(a) &  static_cast<int>(b));
 }
@@ -35,7 +38,7 @@ inline OutputFormat operator-(OutputFormat a, OutputFormat b) {
 }
 inline bool operator == (OutputFormat a, OutputFormat b) {
 	int c = (static_cast<int>(a) & static_cast<int>(b));
-	return (c == static_cast<int>(b) || c == static_cast<int>(a));
+	return static_cast<int>(a) != 0 && static_cast<int>(b) != 0 && (c == static_cast<int>(b) || c == static_cast<int>(a));
 }
 inline bool operator != (OutputFormat a, OutputFormat b) {
 	return !(a == b);
@@ -179,6 +182,8 @@ public:
 	static json::Value parseDocument(const DatabaseCore::RawDocument &doc, OutputFormat format);
 
 	static RevID parseStrRev(const std::string_view &strrev);
+	static json::Value parseStrRevArr(const json::Value &arr);
+	static json::Value serializeStrRevArr(const json::Value &arr);
 	static std::string_view serializeStrRev(RevID rev, char *out, int leftZeroes = 12);
 	static json::String serializeStrRev(RevID rev);
 
