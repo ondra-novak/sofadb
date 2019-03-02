@@ -1,6 +1,36 @@
 # sofadb
 CouchDB inspired document database written in C++. In planning state
 
+## Roadmap
+
+[x] Project creation
+[x] key structre
+[x] storage - leveldb
+[x] storage - memory
+[x] document layout
+[x] rpc server
+[x] database create/delete/list
+[x] documents and revisions
+[x] documents create/delete/list
+[x] conflicts and merge
+[ ] replication - local
+[ ] replication - remote
+[ ] replication managment 
+[ ] live replication
+[ ] memdb bootstrap
+[ ] views
+[ ] design documents
+[ ] materialized reduce 
+[ ] scripting 
+[ ] validation scripts
+[ ] join views
+[ ] users and roles
+[ ] per database ACL
+[ ] per document ACL
+[ ] scripting ACL
+  
+
+
 ## Motivation
 
 To bring standalone database server offering key=document storage,

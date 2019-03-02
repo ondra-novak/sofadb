@@ -1,15 +1,15 @@
 ## RPC Commands
 
-[DB.create](#dbcreate)
-[DB.delete](#dbdelete)
-[DB.list](#dblist)
-[DB.rename](#dbrename)
-[DB.setConfig](#dbsetconfig)
-[DB.changes](#dbchanges)
-[DB.stopChanges](#dbstopchanges)
-[Doc.put](#docput)
-[Doc.get](#docget)
-[Doc.changes](#docchanges)
+- [DB.create](#dbcreate)
+- [DB.delete](#dbdelete)
+- [DB.list](#dblist)
+- [DB.rename](#dbrename)
+- [DB.setConfig](#dbsetconfig)
+- [DB.changes](#dbchanges)
+- [DB.stopChanges](#dbstopchanges)
+- [Doc.put](#docput)
+- [Doc.get](#docget)
+- [Doc.changes](#docchanges)
 
 
 ### DB.create 
