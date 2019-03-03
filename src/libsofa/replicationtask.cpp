@@ -106,7 +106,6 @@ void ReplicationTask::onWarning(Side , int, std::string&& ) {
 
 void ReplicationTask::retryWork() {
 	if (--async_detect < 0) {
-		onUpdate(seqnum);
 		doWork(batch_size);
 	}
 }

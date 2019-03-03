@@ -300,7 +300,9 @@ void RpcAPI::databaseChanges(json::RpcRequest req) {
 					SofaDB::WaitHandle wh = rdb->waitForChanges(h, since, 60000, self);
 					if (wh) {
 						if (nmap->updateNotify(ntfname,wh)) {
-							return ;
+							return;
+						} else {
+							rdb->cancelWaitForChanges(wh,false);
 						}
 					} else {
 						self(true);
