@@ -22,12 +22,13 @@ using ondra_shared::Worker;
 /** The replication works with two interfaces where first interface is used as source and seconds as target. */
 class ReplicationTask {
 public:
+	using PProtocol = std::unique_ptr<IReplicationProtocol>;
 	///Creates replication task
 	/**
 	 * @param source source database
 	 * @param target target database
 	 */
-	ReplicationTask(IReplicationProtocol *source, IReplicationProtocol *target);
+	ReplicationTask(PProtocol &&source, PProtocol &&target);
 	virtual ~ReplicationTask();
 
 	///Starts replication
@@ -60,9 +61,13 @@ public:
 	 */
 	std::size_t getSeqNum() const {return seqnum;}
 
+	enum class Side {
+		source,target
+	};
+
 protected:
 	///Called when replication is finished
-	virtual void onFinish();
+	virtual void onFinish(SeqNum seqnum);
 	///Called when error happen trying to put documents to the database
 	/**
 	 * @param doc document to put
@@ -71,13 +76,18 @@ protected:
 	 * @retval false major error - stop replication
 	 */
 	virtual bool onError(json::Value doc, PutStatus status);
+
+	///Called after task is updated, not neceserily after each seqnum
+	virtual void onUpdate(SeqNum seqnum);
+
+
+	virtual void onWarning(Side side, int code, std::string &&text);
 protected:
 
-	std::unique_ptr<IReplicationProtocol> source, target;
-	mutable std::mutex lock;
-	bool started;
-	std::condition_variable * stopcond;
-	using Sync = std::unique_lock<std::mutex>;
+	PProtocol source, target;
+
+	std::size_t initial_batch_size = 10;
+	std::size_t batch_size = 1000;
 
 
 	void doWork(std::size_t limit);
@@ -90,7 +100,13 @@ protected:
 	SeqNum old_seqnum;
 	json::Value filter;
 	bool continuous;
+	ondra_shared::Countdown exitWait;
+	using Grd = ondra_shared::CountdownGuard;
+
+	std::atomic<bool> started;
+	std::atomic<bool> stopSignal;
 	std::atomic<int> async_detect;
+
 
 };
 

@@ -11,27 +11,18 @@ namespace sofadb {
 
 
 ReplicationServer::ReplicationServer(const DocumentDB &docdb, PEventRouter router, DatabaseCore::Handle h)
-	:docdb(docdb),router(router),h(h) {
+	:docdb(docdb),router(router),h(h),wh(1) {
 }
 
 ReplicationServer::~ReplicationServer() {
-	this->stopRead();
+	this->stop();
 }
 
 void ReplicationServer::readManifest(SeqNum since, std::size_t limit,
 		json::Value filter, bool longpoll,
 		std::function<void(const Manifest&, SeqNum)>&& result) {
 
-	Sync _(lock);
-	if (wh != 0) {
-		stopReadLk(_);
-	}
-
-	readManifestLk(since,limit,filter,longpoll,std::move(result));
-}
-void ReplicationServer::readManifestLk(SeqNum since, std::size_t limit,
-		json::Value filter, bool longpoll,
-		std::function<void(const Manifest&, SeqNum)>&& result) {
+	Cdg _(cd);
 
 
 	DatabaseCore &dbcore = docdb.getDBCore();
@@ -41,6 +32,7 @@ void ReplicationServer::readManifestLk(SeqNum since, std::size_t limit,
 	std::vector<DocRef> docs;
 	SeqNum lastSeq = docdb.getDBCore().readChanges(h, since, false,
 			[&](const DatabaseCore::ChangeRec &chrec){
+		Cdg _(cd);
 		if (flt != nullptr) {
 			DatabaseCore::RawDocument rawdoc;
 			if (!dbcore.findDoc(h,chrec.docid, chrec.revid, rawdoc, tmp)) return true;
@@ -51,23 +43,19 @@ void ReplicationServer::readManifestLk(SeqNum since, std::size_t limit,
 		return --limit > 0;
 	});
 
-	if (!docs.empty()) {
+	if (!docs.empty() || !longpoll) {
 		result(Manifest(docs.data(),docs.size()), lastSeq);
-	}
-
-	if (longpoll) {
+	} else {
 		auto cb = [result = std::move(result),this,filter,lastSeq,limit](bool) mutable {
-			Sync _(lock);
-			if (stopntf) {
-				stopntf->notify_all();
-				return;
-			} else {
-				readManifestLk(lastSeq,limit,filter,true,std::move(result));
-			}
+			readManifest(lastSeq,limit,filter,true,std::move(result));
 		};
 		EventRouter::WaitHandle nwh = router->waitForEvent(h,lastSeq,24*60*60*1000, std::move(cb));
 		if (nwh == 0) {
 			router->dispatch([cb = std::move(cb)]() mutable {cb(true);});
+		} else {
+			if (wh.exchange(nwh) == 0) {
+				router->cancelWait(wh);
+			}
 		}
 
 	}
@@ -76,6 +64,8 @@ void ReplicationServer::readManifestLk(SeqNum since, std::size_t limit,
 
 void ReplicationServer::downloadDocs(const DownloadRequest& dwreq,
 		std::function<void(const DocumentList&)>&& callback) {
+
+	Cdg _(cd);
 
 	std::vector<json::Value> lst;
 	DatabaseCore &dbcore = docdb.getDBCore();
@@ -96,6 +86,9 @@ void ReplicationServer::downloadDocs(const DownloadRequest& dwreq,
 
 void ReplicationServer::downloadDocs(const DownloadTopRequest& dwreq,
 		std::function<void(const DocumentList&)>&& callback) {
+
+	Cdg _(cd);
+
 	std::vector<json::Value> lst;
 	DatabaseCore &dbcore = docdb.getDBCore();
 	std::string tmp;
@@ -115,6 +108,9 @@ void ReplicationServer::downloadDocs(const DownloadTopRequest& dwreq,
 
 void ReplicationServer::uploadHistoricalDocs(const DocumentList& documents,
 		std::function<void(const PutStatusList&)>&& callback) {
+
+	Cdg _(cd);
+
 	std::vector<PutStatus> st;
 	for (auto &&c: documents) {
 		st.push_back(docdb.replicator_put_history(h,c));
@@ -122,25 +118,17 @@ void ReplicationServer::uploadHistoricalDocs(const DocumentList& documents,
 	callback(PutStatusList(st.data(),st.size()));
 }
 
-void ReplicationServer::stopReadLk(Sync &_) {
-	std::condition_variable cond;
-	stopntf = &cond;
-	router->cancelWait(wh,true);
-	cond.wait(_);
-	stopntf = nullptr;
-	wh = 0;
-
-}
-void ReplicationServer::stopRead() {
-	Sync _(lock);
-	if (wh != 0) {
-		stopReadLk(_);
-	}
+void ReplicationServer::stop() {
+	std::size_t x = wh.exchange(0);
+	if (x) router->cancelWait(x,false);
+	cd.wait();
 
 }
 
 void ReplicationServer::sendManifest(const Manifest& manifest,
 						std::function<void(const DownloadRequest&)>&& callback) {
+
+	Cdg _(cd);
 
 	std::string tmp;
 	DatabaseCore &dbcore = docdb.getDBCore();
@@ -163,6 +151,8 @@ void ReplicationServer::sendManifest(const Manifest& manifest,
 void ReplicationServer::uploadDocs(const DocumentList& documents,
 						std::function<void(const PutStatusList&)>&& callback) {
 
+	Cdg _(cd);
+
 	std::vector<PutStatus> st;
 	json::String dummy;
 	for (auto &&c: documents) {
@@ -175,6 +165,8 @@ void ReplicationServer::uploadDocs(const DocumentList& documents,
 void ReplicationServer::resolveConflicts(const DocumentList &documents,
 				std::function<void(const DocumentList &)> &&callback) {
 
+	Cdg _(cd);
+
 	std::vector<json::Value> result;
 
 	for (auto &&doc: documents) {
@@ -186,5 +178,9 @@ void ReplicationServer::resolveConflicts(const DocumentList &documents,
 	callback(DocumentList(result.data(),result.size()));
 }
 
+void ReplicationServer::setWarningCallback(WarningCallback &&callback) {
+	Cdg _(cd);
+	wcb = std::move(callback);
+}
 
 } /* namespace sofadb */

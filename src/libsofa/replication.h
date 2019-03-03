@@ -62,6 +62,7 @@ public:
 	static const SeqNum error = SeqNum(-1);
 
 
+	using WarningCallback = std::function<void(int code, std::string &&)>;
 	using DownloadRequest = std::basic_string_view<DocRef>;
 	using DownloadTopRequest = std::basic_string_view<std::string>;
 	using Manifest = std::basic_string_view<DocRef>;
@@ -115,8 +116,9 @@ public:
 	virtual void downloadDocs(const DownloadTopRequest &dwreq,
 			std::function<void(const DocumentList &)> &&callback) = 0;
 
-	///Stops reading from the source database
-	virtual void stopRead() = 0;
+	///Stops any current running operation
+	/** Function must block until the operation is stopped */
+	virtual void stop() = 0;
 
 	///Sends manifest to the target database
 	/** Function sends manifest so target database can filter the manifest and requests
@@ -159,6 +161,17 @@ public:
 	virtual void resolveConflicts(const DocumentList &documents,
 				std::function<void(const DocumentList &)> &&callback) = 0;
 
+
+	///Registers callbacks to deliver warning appears during communication
+	/** Warnings can help to find problems during replication - because the
+	 * replication protocol should be robust and stable, it won't probably generate
+	 * errors. If there is connection issue, the protocol will try to reconnect and
+	 * restore connection as soon as possible without any retry limit. However to
+	 * give user notice about this issue, it can send a warning  to this function
+	 *
+	 * @param callback
+	 */
+	virtual void setWarningCallback(WarningCallback &&callback) = 0;
 
 	virtual ~IReplicationProtocol() {}
 };

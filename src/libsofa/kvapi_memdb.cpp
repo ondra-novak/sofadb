@@ -132,7 +132,7 @@ MemDBIterator<iterator>::~MemDBIterator() {
 		for (auto &&c: owner->eraseBatch) {
 			owner->data.erase(c);
 		}
-		owner->data.clear();
+		owner->eraseBatch.clear();
 	}
 }
 

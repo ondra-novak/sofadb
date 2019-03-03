@@ -55,6 +55,7 @@ protected:
 	std::shared_ptr<NotifyMap> ntfmap;
 
 
+
 };
 
 } /* namespace sofadb */

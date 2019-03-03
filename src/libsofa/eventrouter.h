@@ -136,9 +136,7 @@ public:
 	void stop();
 
 	template<typename Fn>
-	void dispatch(Fn &&fn) {
-		worker >> std::move(fn);
-	}
+	void dispatch(Fn &&fn);
 
 protected:
 
@@ -148,19 +146,28 @@ protected:
 	SeqNumMap snm;
 
 	typedef std::unique_lock<std::mutex> Sync;
+	typedef ondra_shared::CountdownGuard CntSync;
 
 	GlobalObserverList globlist;
 	Worker worker;
 	std::mutex lock;
-	std::size_t cntr = 0;
-	std::condition_variable *schevent = nullptr, *schexit = nullptr, *wrk_exit=nullptr;
-	std::atomic<std::uintptr_t> running, schrev;
-	class CBGuard;
+	ondra_shared::Countdown cntd;
+
+
+	std::condition_variable *schevent = nullptr;
+	std::atomic<std::uintptr_t>  schrev;
 	void exitAll();
 
 	void reschedule();
 
 };
+
+template<typename Fn>
+void EventRouter::dispatch(Fn &&fn) {
+	worker >> std::move(fn);
+	Sync _(lock);
+	reschedule();
+}
 
 using PEventRouter = RefCntPtr<EventRouter>;
 

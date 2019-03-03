@@ -24,7 +24,6 @@ MaintenanceTask::MaintenanceTask(DatabaseCore& dbcore):dbcore(dbcore) {
 
 void MaintenanceTask::init(PEventRouter router) {
 
-	Sync _(lock);
 
 	if (this->router != nullptr) {
 		this->router->removeObserver(this->oh);
@@ -35,21 +34,19 @@ void MaintenanceTask::init(PEventRouter router) {
 	for (auto &&item:dblist) {
 		Handle h = item.first;
 		SeqNum n = item.second;
-		init_task(dbcore,router,h,n);
+		init_task(router,h,n);
 	}
 
 
-	this->oh = this->router->registerObserver([=](DatabaseCore::ObserverEvent ev, Handle h, SeqNum sq){
+	this->oh = this->router->registerObserver([=,g=Sync(cntd)](DatabaseCore::ObserverEvent ev, Handle h, SeqNum sq){
 		if (ev == DatabaseCore::event_create) {
-			Sync _(lock);
-			init_task(dbcore,router,h,sq);
+			init_task(router,h,sq);
 		}
 		return true;
 	});
 }
 
-bool MaintenanceTask::init_rev_map(DatabaseCore &dbcore,
-			DatabaseCore::RevMap &revision_map,
+bool MaintenanceTask::init_rev_map(DatabaseCore::RevMap &revision_map,
 			Handle h, const std::string_view &id) {
 	std::string tmp;
 	DatabaseCore::RawDocument rawdoc;
@@ -90,9 +87,9 @@ bool MaintenanceTask::init_rev_map(DatabaseCore &dbcore,
 	}
 }
 
-void MaintenanceTask::init_task(DatabaseCore &dbcore, PEventRouter rt, Handle h, SeqNum s) {
+void MaintenanceTask::init_task(PEventRouter rt, Handle h, SeqNum s) {
 	logInfo("Maintenance monitoring is ACTIVE on db $1 since $2", h, s);
-	auto task = [&dbcore,rt,h,s](bool){
+	auto task = [this,rt,h,s,g=Sync(cntd)](bool){
 		SeqNum sq;
 		if (rt->getLastSeqNum(h,sq)) {
 			if (sq != s) {
@@ -101,12 +98,12 @@ void MaintenanceTask::init_task(DatabaseCore &dbcore, PEventRouter rt, Handle h,
 
 				dbcore.readChanges(h,s,false,[&](const DatabaseCore::ChangeRec &rc) {
 					revision_map.clear();
-					if (init_rev_map(dbcore,revision_map,h, rc.docid))
+					if (init_rev_map(revision_map,h, rc.docid))
 						dbcore.cleanHistory(h,rc.docid, revision_map);
 					return true;
 				});
 			}
-			init_task(dbcore, rt,h,sq);
+			init_task(rt,h,sq);
 		} else {
 			logInfo("Maintenance monitoring was REMOVED on db $1 since $2", h, s);
 		}
@@ -121,7 +118,9 @@ void MaintenanceTask::init_task(DatabaseCore &dbcore, PEventRouter rt, Handle h,
 MaintenanceTask::~MaintenanceTask() {
 	if (this->router != nullptr) {
 		this->router->removeObserver(this->oh);
+		cntd.wait();
 	}
+
 }
 
 

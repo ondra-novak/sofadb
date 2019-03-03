@@ -23,16 +23,14 @@ public:
 	virtual ~MaintenanceTask();
 protected:
 
-	static void init_task(DatabaseCore &dbcore, PEventRouter rt, Handle h, SeqNum s);
+	void init_task(PEventRouter rt, Handle h, SeqNum s);
 
-	std::mutex lock;
-	typedef std::unique_lock<std::mutex> Sync;
+	using Sync = ondra_shared::CountdownGuard;
+	ondra_shared::Countdown cntd;
 	PEventRouter router;
 	EventRouter::ObserverHandle oh;
 
-	static bool init_rev_map(DatabaseCore &dbcore,
-			DatabaseCore::RevMap &revision_map,
-			Handle h, const std::string_view &id);
+	bool init_rev_map(DatabaseCore::RevMap &revision_map, Handle h, const std::string_view &id);
 
 
 	DatabaseCore &dbcore;

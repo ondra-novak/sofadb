@@ -17,6 +17,7 @@
 #include "../libsofa/docdb.h"
 #include "../libsofa/systemdbs.h"
 #include "../libsofa/maintenancetask.h"
+#include "../libsofa/replicator.h"
 #include "rpcapi.h"
 #include "debugapi.h"
 
@@ -87,6 +88,8 @@ int main(int argc, char **argv) {
 		serverObj.add_ping();
 		serverObj.add_listMethods();
 		auto sdb = std::make_shared<sofadb::SofaDB>(kvdb);
+		sofadb::Replicator replicator(sdb->getDocDB(), sdb->getEventRouter(), nullptr);
+
 
 		sofadb::RpcAPI rpcApi(sdb);
 		rpcApi.init(serverObj);
