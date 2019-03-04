@@ -277,7 +277,9 @@ void RpcAPI::databaseChanges(json::RpcRequest req) {
 		SharedObserver observer = [rdb,nmap,ntfname,h,since,reversed,fmt,flt,req,offset,limit](SharedObserver self, bool have_data) mutable -> void {
 			if (limit) {
 				bool failed = false;
-				if (have_data) {
+				if (!nmap->isRegistered(ntfname)) {
+					failed = true;
+				} else if (have_data) {
 					since = rdb->readChanges(h, since, reversed, fmt, std::move(flt), [&](const Value &x)  {
 						if (offset) {
 							offset--;
@@ -297,29 +299,27 @@ void RpcAPI::databaseChanges(json::RpcRequest req) {
 					}
 				}
 				if (!failed) {
-					SofaDB::WaitHandle wh = rdb->waitForChanges(h, since, 60000, self);
+					SofaDB::WaitHandle wh = rdb->waitForChanges(h, since, 30000, self);
 					if (wh) {
-						if (nmap->updateNotify(ntfname,wh)) {
-							return;
-						} else {
-							rdb->cancelWaitForChanges(wh,false);
+						if (!nmap->updateNotify(ntfname,wh)) {
+							rdb->cancelWaitForChanges(wh,true);
 						}
 					} else {
 						self(true);
-						return ;
 					}
+					return ;
 				}
 			}
 			req.setResult(Object("seq",since));
 			nmap->stopNotify(ntfname);
-			return ;
 		};
 
 		observer(true);
 	} else {
-		SharedObserver observer = [rdb,h,since,reversed,fmt,flt,req,offset,limit,abstm](SharedObserver self, bool not_timeout) mutable {
-			if (not_timeout) {
-				Array res;
+
+		SharedObserver observer = [=](SharedObserver self, bool not_timeout) mutable {
+			Array res;
+			if (not_timeout && limit) {
 				since = rdb->readChanges(h, since, reversed, fmt, std::move(flt), [&](const Value &x) {
 					if (offset) {
 						offset--;
@@ -338,15 +338,12 @@ void RpcAPI::databaseChanges(json::RpcRequest req) {
 						if (!wh) {
 							self(true);
 						}
-					} else {
-						self(false);
+						return;
 					}
-				} else {
-					req.setResult(res);
 				}
-			} else  {
-				req.setResult(json::array);
 			}
+			req.setResult(Object("seq", since)
+						        ("rows",res));
 		};
 		observer(true);
 	}
@@ -399,7 +396,12 @@ bool RpcAPI::NotifyMap::registerNotify(String notifyName, SofaDB::WaitHandle wai
 	if (iter != notifyMap.end()) return false;
 	notifyMap.insert(std::pair(notifyName,waitHandle));
 	return true;
+}
 
+bool RpcAPI::NotifyMap::isRegistered(json::String notifyName) {
+	std::lock_guard<std::mutex> _(notifyLock);
+	auto iter = notifyMap.find(notifyName);
+	return iter != notifyMap.end();
 }
 
 bool RpcAPI::NotifyMap::updateNotify(json::String notifyName,SofaDB::WaitHandle waitHandle) {

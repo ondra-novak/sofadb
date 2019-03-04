@@ -50,6 +50,7 @@ protected:
 		bool registerNotify(json::String notifyName, SofaDB::WaitHandle waitHandle);
 		bool updateNotify(json::String notifyName, SofaDB::WaitHandle waitHandle);
 		SofaDB::WaitHandle stopNotify(json::String notifyName);
+		bool isRegistered(json::String notifyName);
 	};
 
 	std::shared_ptr<NotifyMap> ntfmap;
