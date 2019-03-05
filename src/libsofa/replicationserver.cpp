@@ -50,12 +50,8 @@ void ReplicationServer::readManifest(SeqNum since, std::size_t limit,
 			readManifest(lastSeq,limit,filter,true,std::move(result));
 		};
 		EventRouter::WaitHandle nwh = router->waitForEvent(h,lastSeq,24*60*60*1000, std::move(cb));
-		if (nwh == 0) {
-			router->dispatch([cb = std::move(cb)]() mutable {cb(true);});
-		} else {
-			if (wh.exchange(nwh) == 0) {
-				router->cancelWait(wh);
-			}
+		if (wh.exchange(nwh) == 0) {
+			router->cancelWait(wh);
 		}
 
 	}

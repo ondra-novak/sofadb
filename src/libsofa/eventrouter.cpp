@@ -56,19 +56,25 @@ EventRouter::WaitHandle EventRouter::waitForEvent(Handle db, SeqNum since, std::
 
 	Sync _(lock);
 
+	std::size_t tmp = 1;
 	auto snmiter = snm.find(db);
-	if (snmiter == snm.end() || snmiter->second > since) return 0;
+	if (snmiter == snm.end() || snmiter->second > since) {
+		worker >> [observer = std::move(observer)] {
+			observer(true);
+		};
+	} else {
 
-	TimePoint tm = TimePoint::clock::now() + std::chrono::milliseconds(timeout);
-	std::size_t tmp = std::chrono::duration_cast<std::chrono::milliseconds>(tm.time_since_epoch()).count();
-	while (omap.find(tmp) != omap.end())
-		tmp++;
+		TimePoint tm = TimePoint::clock::now() + std::chrono::milliseconds(timeout);
+		tmp = std::chrono::duration_cast<std::chrono::milliseconds>(tm.time_since_epoch()).count();
+		while (omap.find(tmp) != omap.end())
+			tmp++;
 
-	Reg &r = omap[tmp];
-	r.db = db;
-	r.observer = std::move(observer);
+		Reg &r = omap[tmp];
+		r.db = db;
+		r.observer = std::move(observer);
 
-	oph.insert(OPHKey(db, tmp));
+		oph.insert(OPHKey(db, tmp));
+	}
 	reschedule();
 	return tmp;
 }

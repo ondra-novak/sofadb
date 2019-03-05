@@ -49,11 +49,6 @@ void Replicator::dispatchRequests() {
 	wh = rt->waitForEvent(h,since, 24*60*60*1000, [=](bool){
 		worker();
 	});
-	if (wh == 0) {
-		rt->dispatch([=] {
-			worker();
-		});
-	}
 }
 
 void Replicator::workerExit() {

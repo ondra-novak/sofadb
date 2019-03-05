@@ -300,12 +300,8 @@ void RpcAPI::databaseChanges(json::RpcRequest req) {
 				}
 				if (!failed) {
 					SofaDB::WaitHandle wh = rdb->waitForChanges(h, since, 30000, self);
-					if (wh) {
-						if (!nmap->updateNotify(ntfname,wh)) {
-							rdb->cancelWaitForChanges(wh,true);
-						}
-					} else {
-						self(true);
+					if (!nmap->updateNotify(ntfname,wh)) {
+						rdb->cancelWaitForChanges(wh,true);
 					}
 					return ;
 				}
@@ -334,10 +330,7 @@ void RpcAPI::databaseChanges(json::RpcRequest req) {
 					std::chrono::time_point<std::chrono::steady_clock> now = std::chrono::steady_clock::now();
 					if (now < abstm) {
 						std::size_t tm = std::chrono::duration_cast<std::chrono::milliseconds>(abstm-now).count();
-						SofaDB::WaitHandle wh = rdb->waitForChanges(h, since, tm, self);
-						if (!wh) {
-							self(true);
-						}
+						rdb->waitForChanges(h, since, tm, self);
 						return;
 					}
 				}

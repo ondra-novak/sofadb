@@ -108,11 +108,7 @@ void MaintenanceTask::init_task(PEventRouter rt, Handle h, SeqNum s) {
 			logInfo("Maintenance monitoring was REMOVED on db $1 since $2", h, s);
 		}
 	};
-	EventRouter::WaitHandle wh = rt->waitForEvent(h,s,1000*86400, task);
-	if (wh == 0) {
-		task(true);
-	}
-
+	rt->waitForEvent(h,s,1000*86400, task);
 }
 
 MaintenanceTask::~MaintenanceTask() {
