@@ -47,6 +47,7 @@ public:
 	typedef std::set<std::string> KeySet;
 
 
+
 	struct DBConfig {
 		///Size of log
 		/** Log contains list of previous revision numbers allowing to easily connect
@@ -116,21 +117,28 @@ private:
 		bool updating = false;
 	};
 
-	typedef std::map<ViewID, ViewState> ViewStateMap;
+	using PViewState = std::unique_ptr<ViewState>;
+
+	typedef std::vector<PViewState> ViewStateMap;
 	typedef std::map<std::string, ViewID, std::less<> > ViewNameToID;
 
 	struct Info {
 		std::string name;
 		SeqNum nextSeqNum = 1;
 		SeqNum nextHistSeqNum = 1;
-		WriteState writeState;
-		ViewStateMap viewState;
-		ViewNameToID viewNameToID;
 		Storage storage;
 
 		DBConfig cfg;
 
 		std::recursive_mutex lock;
+		WriteState writeState;
+		ViewStateMap viewState;
+		ViewNameToID viewNameToID;
+
+		ViewState *getViewState(std::size_t id) const {
+			if (id < viewState.size()) return viewState[id].get();
+			else return nullptr;
+		}
 	};
 
 	typedef std::map<std::string_view, Handle, std::less<> > NameToIDMap;
@@ -191,16 +199,6 @@ public:
 		bool deleted;
 		///rest of the document is stored as json
 		std::string_view payload;
-	};
-
-	struct ViewUpdateRow {
-		std::string_view key;
-		std::string_view value;
-	};
-
-
-	struct ViewResult: public ViewUpdateRow {
-		std::string_view docid;
 	};
 
 	class Lock {
@@ -352,138 +350,6 @@ public:
 	SeqNum readChanges(Handle h, SeqNum from, bool reversed, std::function<bool(const ChangeRec &)> &&fn);
 
 
-	///Makes lookup to a view for key
-	/**
-	 * @param viewID ID of view
-	 * @param key key to search - function always treat this key as prefix
-	 * @param reversed - return records in reversed order
-	 * @param callback - function called for every record. Function return false to stop reading
-	 * @retval true found results
-	 * @retval false nothing found
-	 */
-	bool viewLookup(ViewID viewID, const std::string_view &key, bool reversed,  std::function<bool(const ViewResult &)> &&callback);
-
-	///Makes lookup to a view for given key range
-	/**
-	 * @param viewID ID of view
-	 * @param start_key first key in lookup
-	 * @param end_key end key in lookup - it is always excluded
-	 * @param start_doc first document of that key, it can be empty to start from the begining of the key
-	 * @param end_doc last document of the end_key, which will be excluded
-	 * @param callback function called for every result
-	 * @retval true found results
-	 * @retval false nothing found
-	 */
-	bool viewLookup(ViewID viewID,
-					const std::string_view &start_key,
-					const std::string_view &end_key,
-					const std::string_view &start_doc,
-					const std::string_view &end_doc,
-					std::function<bool(const ViewResult &)> &&callback);
-
-	///Checks whether view need update
-	/**
-	 * @param h handle to db
-	 * @param view view to view
-	 * @retval 0 the view doesn't need to update (or not exists)
-	 * @retval >0 the view need update from given seq_number.
-	 *
-	 * @note seqnum always starts on 1, so zero is used as "not need update".
-	 */
-	SeqNum needViewUpdate(Handle h, ViewID view) ;
-
-	///Should be called after view update is done
-	/**
-	 * @param h handle to db
-	 * @param view view id
-	 * @param seqNum sequence number
-	 * @retval true updated
-	 * @retval false view not found
-	 *
-	 * @note it is better to open write batch to better performance
-	 */
-	bool updateViewState(Handle h, ViewID view, SeqNum seqNum);
-
-	///Anounces that specified view is being updated
-	/**
-	 * @param h database handle
-	 * @param view view ID
-	 * @retval true granted
-	 * @retval false already being updated
-	 *
-	 */
-	bool view_beginUpdate(Handle h, ViewID view);
-
-	///Anounces that specified view has been updated
-	/**
-	 * @param h database handle
-	 * @param view view ID
-	 */
-	void view_endUpdate(Handle h, ViewID view);
-
-	///Registers callback, which is called when view finishes its update
-	/**
-	 *
-	 * @param h database handle
-	 * @param view view ID
-	 * @param cb callback function
-	 * @retval true registered
-	 * @retval false database or view doesn't exists
-	 */
-	bool view_onUpdateFinish(Handle h, ViewID view, Callback &&cb);
-
-
-	///Updates document in the view
-	/**
-	 *
-	 * @param view id of view
-	 * @param docId document id
-	 * @param updates key-value records for the document. You need to send all keys
-	 * in a single update. If this array is empty, the function just deletes the
-	 * document from the view
-	 * @param updatedKeys set which is filled by keys that was modified and must be
-	 * 		updated in reduced maps.
-	 * @retval true updated
-	 * @retval false can't update. Probably view or database has been removed
-	 *
-	 * @note the function first delete previous update
-	 */
-	bool view_updateDocument(Handle h, ViewID view, const std::string_view &docId,
-				const std::basic_string_view<ViewUpdateRow> &updates,
-				KeySet &updatedKeys);
-
-	///Creates new view
-	/**
-	 * Creates new empty view. It starts immediately inidicate that need update
-	 * @param h handle to database
-	 * @param name name of the view (user defined name or identification)
-	 * @return ID of the view. The ID is globally unique and used to access
-	 * the data of the view on core object. Function can return 0 if the
-	 * h contains invalid handle
-	 *
-	 * @see findView
-	 */
-	ViewID createView(Handle h, const std::string_view &name);
-	///Finds view by name
-	/**
-	 *
-	 * @param h ID of database
-	 * @param name name of the view
-	 * @return function returns ID of the view, or zero if view doesn't not exists
-	 */
-	ViewID findView(Handle h, const std::string_view &name);
-
-	///Deletes view
-	/**
-	 * @param h handle to database
-	 * @param view id to view
-	 * @retval true send for deletetion
-	 * @retval false view not found
-	 */
-	bool deleteView(Handle h, ViewID view);
-
-
-
 	///Sets observer
 	/** There can be one observer which is called on every update in any databse.
 	 * The observer receives handle of the database
@@ -527,6 +393,59 @@ public:
 	///Prevents writes to other threads while the lock is held
 	Lock lockWrite(Handle h);
 
+
+	///Creates new view
+	/**
+	 * @param h handle to database
+	 * @param name name of new view
+	 * @return return handle to view or invalid_handle if there is already view with same name
+	 */
+	ViewID createView(Handle h, const std::string_view &name);
+
+	///Erases view
+	/**
+	 * @param h handle to database
+	 * @param viewId ID of view
+	 * @retval true erased
+	 * @retval false not found
+	 */
+	bool eraseView(Handle h, ViewID viewId);
+
+
+	///Checks whether view needs update
+	/**
+	 *
+	 * @param h db handle
+	 * @param viewId view handle
+	 * @retval true need update
+	 * @retval false not need update
+	 */
+	bool view_needUpdate(Handle h, ViewID viewId);
+
+
+	///Locks view for update
+	/**
+	 * @param h handle to database
+	 * @param viewId handle to view
+	 * @retval true locked
+	 * @retval false not needed, view is already updated
+	 */
+	bool view_lockUpdate(Handle h, ViewID viewId);
+
+
+	///Waits for update
+	/**
+	 * @param h handle to database
+	 * @param viewId view id
+	 * @param callback function will be called once the view is updated
+	 * @retval true success
+	 * @retval false failer - invalid handle or invalid viewId
+	 */
+	bool view_waitForUpdate(Handle h, ViewID viewId, Callback callback);
+
+
+	bool view_finishUpdate();
+
 protected:
 
 	PKeyValueDatabase maindb,memdb;
@@ -569,6 +488,8 @@ protected:
 	PKeyValueDatabase selectDB(Storage storage) const;
 
 	void loadDB(Iterator &iter);
+
+
 };
 
 } /* namespace sofadb */

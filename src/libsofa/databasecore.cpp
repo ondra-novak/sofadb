@@ -112,10 +112,6 @@ bool DatabaseCore::erase(Handle h) {
 		std::unique_ptr<Info> nfo (std::move(dblist[h]));
 		if (nfo == nullptr) return;
 
-		for (auto &&w: nfo->viewState) {
-			deleteViewRaw(h, w.first);
-		}
-
 		PChangeset chst = selectDB(h)->createChangeset();
 
 
@@ -128,6 +124,12 @@ bool DatabaseCore::erase(Handle h) {
 		key_seq(key, h);
 		chst->erasePrefix(key);
 		key_object_index(key, h);
+		chst->erasePrefix(key);
+		key_view_docs(key, h);
+		chst->erasePrefix(key);
+		key_view_map(key, h);
+		chst->erasePrefix(key);
+		key_view_state(key, h);
 		chst->erasePrefix(key);
 		chst->commit();
 
@@ -342,9 +344,9 @@ void DatabaseCore::eraseDoc(Handle h, const std::string_view& docid, KeySet &mod
 	key_docs(key,h, docid);
 	chng->erase(key);
 
-	for (auto &&v : nfo->viewState) {
+/*	for (auto &&v : nfo->viewState) {
 		view_updateDocument(h, v.first, docid, std::basic_string_view<ViewUpdateRow>(), modifiedKeys);
-	}
+	}*/
 
 	endBatch(nfo);
 
@@ -438,120 +440,6 @@ SeqNum DatabaseCore::readChanges(Handle h, SeqNum from, bool reversed,
 	return seq;
 }
 
-bool DatabaseCore::viewLookup(ViewID viewID, const std::string_view& prefix,
-		bool reversed, std::function<bool(const ViewResult&)>&& callback) {
-/*
-	std::string key, value;
-	std::size_t skip;
-	key_view_map(key,viewID);
-	skip = key.length();
-	key_view_map(key,viewID, prefix);
-	Iterator iter(maindb->findRange(key,reversed));
-	bool f = false;
-	ViewResult res;
-	while (iter.getNext()) {
-		extract_from_key(iter->first, skip, res.key, res.docid);
-		extract_value(iter->second, res.value);
-		if (!callback(res)) return true;
-		f = true;
-	}
-	return f;
-*/
-}
-
-bool DatabaseCore::viewLookup(ViewID viewID, const std::string_view& start_key,
-		const std::string_view& end_key, const std::string_view& start_doc,
-		const std::string_view& end_doc,
-		std::function<bool(const ViewResult&)>&& callback) {
-/*
-	std::string key1, key2, value;
-	std::size_t skip;
-	key_view_map(key1,viewID);
-	skip = key1.length();
-	key_view_map(key1,viewID, start_key, start_doc);
-	key_view_map(key2,viewID, end_key, end_doc);
-	Iterator iter(maindb->findRange(key1,key2));
-	bool f = false;
-	ViewResult res;
-	while (iter.getNext()) {
-		extract_from_key(iter->first, skip, res.key, res.docid);
-		extract_value(iter->second, res.value);
-		if (!callback(res)) return true;
-		f = true;
-	}
-	return f;
-	*/
-}
-
-SeqNum DatabaseCore::needViewUpdate(Handle h, ViewID view) {
-	PInfo nfo = getDatabaseState(h);
-	if (nfo == nullptr) return 0;
-	auto iter = nfo->viewState.find(view);
-	if (iter == nfo->viewState.end()) return 0;
-	if (nfo->nextSeqNum-1 == iter->second.seqNum) return 0;
-	return iter->second.seqNum;
-}
-
-bool DatabaseCore::updateViewState(Handle h, ViewID view, SeqNum seqNum) {
-	std::string key,value;
-
-	PInfo nfo = getDatabaseState(h);
-	if (nfo == nullptr) return false;
-	auto iter = nfo->viewState.find(view);
-	if (iter == nfo->viewState.end()) return false;
-	iter->second.seqNum = seqNum;
-	PChangeset chng = beginBatch(nfo);
-	key_view_state(key,h,view);
-	serialize_value(value,iter->second.seqNum, iter->second.name);
-	chng->put(key, value);
-	endBatch(nfo);
-	return true;
-}
-
-bool DatabaseCore::view_updateDocument(Handle h, ViewID view,
-		const std::string_view& docId,
-		const std::basic_string_view<ViewUpdateRow>& updates,
-		KeySet &modifiedKeys) {
-/*
-	std::string key;
-	std::string value;
-	std::string key2,value2;
-
-	key_view_docs(key, view, docId);
-	PInfo nfo = getDatabaseState(h);
-	if (nfo == nullptr) return false;
-	if (maindb->lookup(key,value)) {
-		PChangeset chng = beginBatch(nfo);
-		KCursor kcrs;
-		std::string_view kk;
-		std::string_view vv(value);
-		while (!vv.empty()) {
-			extract_value(vv,kk,kcrs);
-			vv = kcrs(vv);
-			key_view_map(key,view,kk,docId);
-			chng->erase(key);
-			modifiedKeys.insert(std::string(kk));
-		}
-		chng->erase(key);
-		endBatch(nfo);
-	}
-	if (!updates.empty()) {
-		PChangeset chng = beginBatch(nfo);
-		value2.clear();
-		for (auto &&c: updates) {
-			modifiedKeys.insert(std::string(c.key));
-			key_view_map(key,view,c.key,docId);
-			chng->put(key, c.value);
-			value2.append(c.key);
-			_misc::addSep(value2);
-		}
-		key_view_docs(key,view, docId);
-		chng->put(key,value2);
-		endBatch(nfo);
-	}
-	return true;
-	*/
-}
 
 void DatabaseCore::endBatch(PInfo &nfo) {
 	if (nfo->writeState.lockCount > 0) {
@@ -586,99 +474,6 @@ void DatabaseCore::value2document(const std::string_view &value, RawDocument &do
 	doc.payload = kc(value);
 }
 
-void DatabaseCore::view_endUpdate(Handle h, ViewID view) {
-	auto dbf = getDatabaseState(h);
-	if (dbf == nullptr) return ;
-	auto itr = dbf->viewState.find(view);
-	if (itr == dbf->viewState.end()) return;
-	itr->second.updating = false;
-	while (!itr->second.waiting.empty() && !itr->second.updating) {
-		auto &&fn = std::move(itr->second.waiting.front());
-		itr->second.waiting.pop();
-		fn();
-	}
-}
-
-bool DatabaseCore::view_onUpdateFinish(Handle h, ViewID view, Callback&& cb) {
-	auto dbf = getDatabaseState(h);
-	if (dbf == nullptr) return false;
-	auto itr = dbf->viewState.find(view);
-	if (itr == dbf->viewState.end()) return false;
-
-	if (itr->second.updating) {
-		itr->second.waiting.push(std::move(cb));
-	} else {
-		cb();
-	}
-	return true;
-}
-
-
-
-
-bool DatabaseCore::deleteView(Handle h, ViewID view) {
-	auto dbf = getDatabaseState(h);
-	if (dbf == nullptr) return false;
-	auto itr = dbf->viewState.find(view);
-	if (itr == dbf->viewState.end()) return false;
-	dbf->viewNameToID.erase(itr->second.name);
-	dbf->viewState.erase(itr);
-	deleteViewRaw(h,view);
-	return true;
-}
-
-void DatabaseCore::deleteViewRaw(Handle h, ViewID view) {
-	/*
-	PChangeset chset = maindb->createChangeset();
-	std::string key;
-	key_view_docs(key,view);
-	chset->erasePrefix(key);
-	key_view_map(key,view);
-	chset->erasePrefix(key);
-	key_view_state(key,h,view);
-	chset->erase(key);
-*/
-}
-
-ViewID DatabaseCore::allocView() {
-	/*
-	std::lock_guard<std::recursive_mutex> _(lock);
-	return nextViewID;
-	*/
-}
-
-bool DatabaseCore::view_beginUpdate(Handle h, ViewID view) {
-	auto dbf = getDatabaseState(h);
-	if (dbf == nullptr) return false;
-	auto itr = dbf->viewState.find(view);
-	if (itr == dbf->viewState.end()) return false;
-	if (itr->second.updating) return false;
-	itr->second.updating = true;
-	return true;
-}
-
-ViewID DatabaseCore::createView(Handle h, const std::string_view& name) {
-	std::string key,value;
-
-	auto dbf = getDatabaseState(h);
-	if (dbf == nullptr) return 0;
-	ViewID w = allocView();
-	dbf->viewState[w].name = name;
-	dbf->viewNameToID[std::string(name)] = w;
-	auto chng = beginBatch(dbf);
-	key_view_state(key, h, w);
-	serialize_value(value, std::uint64_t(0), name);
-	endBatch(dbf);
-	return w;
-}
-
-ViewID DatabaseCore::findView(Handle h, const std::string_view& name) {
-	auto dbf = getDatabaseState(h);
-	if (dbf == nullptr) return 0;
-	auto iter = dbf->viewNameToID.find(name);
-	if (iter == dbf->viewNameToID.end()) return 0;
-	return iter->second;
-}
 
 bool DatabaseCore::rename(Handle h, const std::string_view& newname) {
 	if (newname.empty()) return false;
@@ -924,6 +719,22 @@ void DatabaseCore::loadDB(Iterator &iter) {
 
 		loadDBConfig(h,nfo->cfg);
 
+
+
+		key_view_state(key,idx);
+		Iterator vi ( maindb->findRange(key,false) );
+		while (vi.getNext()) {
+			std::uint32_t viewid;
+			extract_from_key(vi->first, key.length(), viewid);
+			ViewState st;
+			extract_value(vi->second, st.seqNum, st.name);
+			st.updating = false;
+
+			while (nfo->viewState.size() <= viewid) nfo->viewState.push_back(nullptr);
+			nfo->viewState[viewid] = std::make_unique<ViewState>(st);
+			nfo->viewNameToID[nfo->viewState[viewid]->name] = viewid;
+		}
+
 		dblist[idx] = std::move(nfo);
 
 		if (observer) observer(event_create,h,0);
@@ -935,5 +746,75 @@ DatabaseCore::Lock DatabaseCore::lockWrite(Handle h) {
 	return Lock(getDatabaseState(h));
 }
 
+ViewID DatabaseCore::createView(Handle h, const std::string_view &name) {
+
+	std::string key,value;
+	PInfo nfo = getDatabaseState(h);
+	if (nfo == nullptr) return invalid_handle;
+	auto iter = nfo->viewNameToID.find(name);
+	if (iter != nfo->viewNameToID.end()) return invalid_handle;
+
+	int id;
+	for (id = 0; id < nfo->viewState.size(); id++) {
+		if (nfo->viewState[id] == nullptr) break;
+	}
+	if (id == nfo->viewState.size()) nfo->viewState.push_back(nullptr);
+
+	PChangeset ch = beginBatch(nfo);
+	key_view_state(key,h,id);
+	serialize_value(value,0,name);
+	ch->put(key,value);
+	endBatch(nfo);
+
+	ViewState vst;
+	vst.name = name;
+	vst.seqNum = 0;
+	vst.updating = false;
+	nfo->viewState[id] = std::make_unique<ViewState>(vst);
+	nfo->viewNameToID[nfo->viewState[id]->name] = id;
+
+	return id;
+}
+
+bool DatabaseCore::eraseView(Handle h, ViewID viewId) {
+
+	PInfo nfo = getDatabaseState(h);
+	if (nfo == nullptr) return false;
+	if (viewId >= nfo->viewState.size()) return false;
+	auto & vst = nfo->viewState[viewId];
+	if (vst == nullptr) return false;
+
+	nfo->viewNameToID.erase(nfo->viewState[viewId]->name);
+	PViewState &st = nfo->viewState[viewId];
+
+	auto clearJob = [this,h,viewId] {
+
+		PInfo nfo = getDatabaseState(h);
+		if (nfo == nullptr) return;
+
+		PChangeset chs = this->beginBatch(nfo);
+		std::string key;
+		key_view_docs(key,h,viewId);
+		chs->erasePrefix(key);
+		key_view_map(key,h,viewId);
+		chs->erasePrefix(key);
+		key_view_state(key,h,viewId);
+		chs->erasePrefix(key);
+
+		this->endBatch(nfo);
+		nfo->viewState[viewId] = nullptr;
+
+	};
+
+	if (st->updating) {
+		//force stop updating
+		st->seqNum = -1;
+		st->waiting.push(clearJob);
+	} else {
+		clearJob();
+	}
+
+	return true;
+}
 
 } /* namespace sofadb */

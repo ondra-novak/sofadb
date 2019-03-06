@@ -132,6 +132,9 @@ inline void key_doc_revs(std::string &key, std::uint32_t dbid, const std::string
 inline void key_doc_revs(std::string &key, std::uint32_t dbid, const std::string_view &docid, const std::uint64_t &revid) {
 	build_key(key, IndexType::doc_revs, dbid, docid,revid);
 }
+inline void key_view_map(std::string &key, std::uint32_t dbid) {
+	build_key(key, IndexType::view_map, dbid);
+}
 inline void key_view_map(std::string &key, std::uint32_t dbid, std::uint32_t viewid) {
 	build_key(key, IndexType::view_map, dbid, viewid);
 }
@@ -140,6 +143,9 @@ inline void key_view_map(std::string &key, std::uint32_t dbid, std::uint32_t vie
 }
 inline void key_view_map(std::string &key, std::uint32_t dbid, std::uint32_t viewid, const std::string_view &keys, const std::string_view &docid) {
 	build_key(key, IndexType::view_map,dbid, viewid, keys, docid);
+}
+inline void key_view_docs(std::string &key, std::uint32_t dbid) {
+	build_key(key, IndexType::view_docs,dbid);
 }
 inline void key_view_docs(std::string &key, std::uint32_t dbid, std::uint32_t viewid) {
 	build_key(key, IndexType::view_docs,dbid, viewid);
@@ -178,6 +184,7 @@ inline unsigned int extract_from_key(const std::string_view &, std::size_t skip,
 
 template<typename ... Args> inline unsigned int extract_from_key(const std::string_view &key, std::size_t skip, std::uint32_t &v, Args &... vars);
 template<typename ... Args> inline unsigned int extract_from_key(const std::string_view &key, std::size_t skip, std::string_view &v, Args &... vars);
+template<typename ... Args> inline unsigned int extract_from_key(const std::string_view &key, std::size_t skip, std::string &v, Args &... vars);
 
 template<typename ... Args>
 inline unsigned int extract_from_key(const std::string_view &key, std::size_t skip, std::uint64_t &v, Args &... vars) {
