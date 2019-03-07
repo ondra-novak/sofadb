@@ -36,6 +36,25 @@ protected:
 };
 
 
+///Memory snapshot
+/**
+ * @note we will only emulate snapshot by keeping lock to avoid changes from other threads
+ * It expects that snapshot is not kept for long time
+ */
+class MemDBSnapshot: public AbstractKeyValueDatabaseSnapshot {
+public:
+	MemDBSnapshot(RefCntPtr<MemDB> owner);
+
+	virtual PIterator findRange(const std::string_view &prefix, bool reverse = false);
+	virtual PIterator findRange(const std::string_view &start, const std::string_view &end);
+	virtual bool lookup(const std::string_view &key, std::string &value);
+	virtual bool exists(const std::string_view &key);
+	virtual bool existsPrefix(const std::string_view &key);
+protected:
+	RefCntPtr<MemDB> owner;
+	std::unique_lock<std::recursive_mutex> lock;
+};
+
 
 
 class MemDB: public AbstractKeyValueDatabase {
@@ -49,13 +68,14 @@ public:
 	virtual bool exists(const std::string_view &key) ;
 	virtual bool existsPrefix(const std::string_view &key) ;
 	virtual void destroy();
+	virtual PKeyValueDatabaseSnapshot createSnapshot();
 
 protected:
 
 
 	using DataMap = std::map<std::string, std::string, std::less<> >;
 
-	std::mutex lock;
+	std::recursive_mutex lock;
 	DataMap data;
 	unsigned int iterCount = 0;
 	std::vector<std::string> eraseBatch;
@@ -63,9 +83,11 @@ protected:
 
 	friend class MemDBChangeset;
 	template<typename> friend class MemDBIterator;
+	friend class MemDBSnapshot;
 
-	using Sync = std::unique_lock<std::mutex>;
+	using Sync = std::unique_lock<std::recursive_mutex>;
 };
+
 
 template<typename iterator>
 class MemDBIterator: public AbstractIterator {

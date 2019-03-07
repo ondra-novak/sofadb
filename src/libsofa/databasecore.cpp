@@ -171,7 +171,7 @@ bool DatabaseCore::beginBatch(Handle h, bool exclusive ) {
 	return true;
 }
 
-PChangeset DatabaseCore::beginBatch(PInfo &nfo) {
+PChangeset DatabaseCore::beginBatch(const PInfo &nfo) {
 	++nfo->writeState.lockCount;
 	if (nfo->writeState.curBatch == nullptr)
 		nfo->writeState.curBatch = selectDB(nfo->storage)->createChangeset();
@@ -441,7 +441,7 @@ SeqNum DatabaseCore::readChanges(Handle h, SeqNum from, bool reversed,
 }
 
 
-void DatabaseCore::endBatch(PInfo &nfo) {
+void DatabaseCore::endBatch(const PInfo &nfo) {
 	if (nfo->writeState.lockCount > 0) {
 		--nfo->writeState.lockCount;
 		if (nfo->writeState.lockCount == 0) {
@@ -687,6 +687,7 @@ PKeyValueDatabase DatabaseCore::selectDB(Storage storage) const {
 	if (storage == Storage::memory) return memdb; else return maindb;
 }
 
+
 void DatabaseCore::loadDB(Iterator &iter) {
 	std::string key;
 	while (iter.getNext()) {
@@ -754,7 +755,7 @@ ViewID DatabaseCore::createView(Handle h, const std::string_view &name) {
 	auto iter = nfo->viewNameToID.find(name);
 	if (iter != nfo->viewNameToID.end()) return invalid_handle;
 
-	int id;
+	std::size_t id;
 	for (id = 0; id < nfo->viewState.size(); id++) {
 		if (nfo->viewState[id] == nullptr) break;
 	}
@@ -762,7 +763,7 @@ ViewID DatabaseCore::createView(Handle h, const std::string_view &name) {
 
 	PChangeset ch = beginBatch(nfo);
 	key_view_state(key,h,id);
-	serialize_value(value,0,name);
+	serialize_value(value,ViewID(0),name);
 	ch->put(key,value);
 	endBatch(nfo);
 
@@ -816,5 +817,253 @@ bool DatabaseCore::eraseView(Handle h, ViewID viewId) {
 
 	return true;
 }
+
+bool DatabaseCore::view_updateDoc(Handle h, ViewID viewId, SeqNum seqNum,
+		const std::string_view& docId,
+		const std::basic_string_view<std::pair<std::string,std::string> >& keyvaluedata,
+		AlterKeyObserver &&altered_keys) {
+
+	PInfo nfo = getDatabaseState(h);
+	if (nfo == nullptr) return false;
+	ViewState *vst = nfo->getViewState(viewId);
+	if (vst == nullptr) return false;
+	if (vst->seqNum >= seqNum) return false;
+
+	PChangeset ch = beginBatch(nfo);
+
+	std::string key,value;
+
+	view_eraseDoc2(h,viewId,nfo,docId, std::move(altered_keys));
+	if (!keyvaluedata.empty()) {
+		for (auto &&c : keyvaluedata) {
+			key_view_map(key,h,viewId,c.first,docId);
+			ch->put(key,c.second);
+		}
+		for (auto &&c: keyvaluedata) {
+			value.append(c.first);
+			value.push_back(0);
+			value.push_back(0);
+			altered_keys(c.first);
+		}
+		key_view_docs(key,h,viewId,docId);
+		value.pop_back();
+		value.pop_back();
+		ch->put(key,value);
+	}
+	vst->seqNum = seqNum;
+	endBatch(nfo);
+	return true;
+
+
+}
+
+bool DatabaseCore::view_needUpdate(Handle h, ViewID viewId) {
+	PInfo nfo = getDatabaseState(h);
+	if (nfo == nullptr) return false;
+	ViewState *vst = nfo->getViewState(viewId);
+	if (vst == nullptr) return false;
+	return vst->seqNum+1 < nfo->nextSeqNum;
+
+}
+
+bool DatabaseCore::view_lockUpdate(Handle h, ViewID viewId) {
+	PInfo nfo = getDatabaseState(h);
+	if (nfo == nullptr) return false;
+	ViewState *vst = nfo->getViewState(viewId);
+	if (vst == nullptr) return false;
+	if (vst->seqNum+1 >= nfo->nextSeqNum) return false;
+	if (vst->updating) return false;
+	vst->updating = true;
+	return true;
+}
+
+bool DatabaseCore::view_waitForUpdate(Handle h, ViewID viewId, Callback callback) {
+	PInfo nfo = getDatabaseState(h);
+	if (nfo == nullptr) return false;
+	ViewState *vst = nfo->getViewState(viewId);
+	if (vst == nullptr) return false;
+	if (vst->updating) vst->waiting.push(callback);
+	else {
+		nfo = nullptr;
+		callback();
+	}
+	return true;
+}
+
+bool DatabaseCore::view_finishUpdate(Handle h, ViewID viewId) {
+	PInfo nfo = getDatabaseState(h);
+	if (nfo == nullptr) return false;
+	ViewState *vst = nfo->getViewState(viewId);
+	if (vst == nullptr) return false;
+	if (!vst->updating) return false;
+
+	//store final sequence number into database
+	PChangeset ch = beginBatch(nfo);
+	std::string key, value;
+	key_view_state(key,h,viewId);
+	serialize_value(value,vst->seqNum,vst->name);
+	ch->put(key,value);
+	endBatch(nfo);
+
+	vst->updating = false;
+	decltype(vst->waiting) q;
+	std::swap(q, vst->waiting);
+	nfo = nullptr;
+	while (!q.empty()) {
+		Callback cb ( std::move(q.front()));
+		q.pop();
+		cb();
+	}
+	return true;
+
+}
+
+void DatabaseCore::view_eraseDoc2(Handle h, ViewID viewId, const PInfo &nfo,
+		const std::string_view& doc_id, AlterKeyObserver && altered_keys) {
+	PChangeset ch = beginBatch(nfo);
+
+	std::string key;
+	std::string value;
+	key_view_docs(key, h, viewId, doc_id);
+	if (maindb->lookup(key, value)) {
+		ch->erase(key);
+		json::StrViewA data(value);
+		auto splt = data.split(json::StrViewA("\0\0", 2));
+		while (!!splt) {
+			std::string_view kv = splt();
+			altered_keys(kv);
+			key_view_map(key, h, viewId, kv, doc_id);
+			ch->erase(key);
+		}
+	}
+	endBatch(nfo);
+
+}
+
+bool DatabaseCore::view_eraseDoc(Handle h, ViewID viewId,
+		std::string_view& doc_id, AlterKeyObserver&& altered_keys) {
+
+	PInfo nfo = getDatabaseState(h);
+	if (nfo == nullptr) return false;
+
+
+	view_eraseDoc2(h, viewId, nfo, doc_id, std::move(altered_keys));
+	return true;
+}
+
+SeqNum DatabaseCore::view_getDocKeys(Handle h, ViewID viewId,
+		std::string_view& docId,
+		std::function<bool(const ViewResult&)> &&callback) {
+
+	PKeyValueDatabaseSnapshot snap = maindb->createSnapshot();
+	std::string key,value,value2;
+	SeqNum num = 0;
+	key_view_state(key,h,viewId);
+	if (snap->lookup(key,value)) {
+		extract_value(value,num);
+		key_view_docs(key,h,viewId,docId);
+		if (snap->lookup(key,value)) {
+			json::StrViewA data(value);
+			auto splt = data.split(json::StrViewA("\0\0", 2));
+			while (!!splt) {
+				std::string_view kv = splt();
+				key_view_map(key,h,viewId,kv,docId);
+				snap->lookup(key, value2);
+				if (!callback(ViewResult{docId,kv,value2}))
+					break;
+			}
+		}
+	}
+	return num;
+}
+
+SeqNum DatabaseCore::view_list(Handle h, ViewID viewId,
+		std::string_view& prefix, bool reversed,
+		std::function<bool(const ViewResult&)> &&callback) {
+
+	PKeyValueDatabaseSnapshot snap = maindb->createSnapshot();
+	std::string key,value;
+	SeqNum num = 0;
+	key_view_state(key,h,viewId);
+	if (snap->lookup(key,value)) {
+		extract_value(value,num);
+		key_view_map(key,h,viewId,prefix);
+		Iterator iter(snap->findRange(key,reversed));
+		while (iter.getNext()) {
+			std::string_view kv,docId;
+			extract_from_key(iter->first, key.length()-prefix.length(), kv, docId);
+			if (!callback(ViewResult{docId,kv,iter->second}))
+				break;
+		}
+	}
+	return num;
+}
+
+SeqNum DatabaseCore::view_getSeqNum(Handle h, ViewID viewId) {
+	PInfo nfo = getDatabaseState(h);
+	if (nfo == nullptr) return false;
+	ViewState *vst = nfo->getViewState(viewId);
+	if (vst == nullptr) return false;
+	return vst->seqNum;
+}
+
+SeqNum DatabaseCore::view_list(Handle h, ViewID viewId,
+		std::string_view& start_key, std::string_view& end_key,
+		std::function<bool(const ViewResult&)> &&callback) {
+
+	PKeyValueDatabaseSnapshot snap = maindb->createSnapshot();
+	std::string key1,key2,value;
+	SeqNum num = 0;
+	key_view_state(key1,h,viewId);
+	if (snap->lookup(key1,value)) {
+		extract_value(value,num);
+		key_view_map(key1,h,viewId,start_key);
+		key_view_map(key2,h,viewId,end_key);
+		Iterator iter(snap->findRange(key1,key2));
+		while (iter.getNext()) {
+			std::string_view kv,docId;
+			extract_from_key(iter->first, key1.length()-start_key.length(), kv, docId);
+			if (!callback(ViewResult{docId,kv,iter->second}))
+				break;
+		}
+	}
+	return num;
+}
+
+bool DatabaseCore::view_update(Handle h, ViewID viewId, std::size_t limit, ViewUpdateFn &&updateFn, AlterKeyObserver &&observer) {
+	if (view_lockUpdate(h,viewId)) {
+		try {
+			SeqNum seqnum = view_getSeqNum(h,viewId);
+			std::string_view docId;
+			std::string tmp;
+			std::basic_string<std::pair<std::string, std::string> > kvdata;
+
+			ViewEmitFn emitFn = [&](std::string_view key, std::string_view value) {
+				kvdata.push_back(std::pair(std::string(key),std::string(value)));
+			};
+
+			readChanges(h,seqnum,false,[&](const ChangeRec &rec) {
+
+				docId = rec.docid;
+				RawDocument rawdoc;
+				if (findDoc(h,docId,rawdoc,tmp)) {
+					kvdata.clear();
+					updateFn(rawdoc,emitFn);
+					view_updateDoc(h,viewId,rec.seqnum,docId,kvdata,std::move(observer));
+				}
+				return --limit;
+			});
+
+			view_finishUpdate(h,viewId);
+			return true;
+		} catch (...) {
+			view_finishUpdate(h,viewId);
+			throw;
+		}
+	} else {
+		return false;
+	}
+}
+
 
 } /* namespace sofadb */

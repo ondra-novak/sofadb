@@ -49,9 +49,6 @@ PIterator LevelDBDatabase::findRange(const std::string_view& start,
 	return new LevelDBIteratorRange(start, end, db->NewIterator(opt));
 }
 
-/*PIterator LevelDBDatabase::find(const std::string_view& prefix) {
-	db->
-}*/
 
 bool LevelDBDatabase::lookup(const std::string_view& key, std::string& value) {
 	leveldb::ReadOptions opt;
@@ -220,6 +217,66 @@ void LevelDBDatabase::destroy() {
 bool LevelDBDatabase::isDestroyed() const {
 	std::string dummy;
 	return db->Get(leveldb::ReadOptions(), destroy_key, &dummy).ok();
+}
+
+
+PKeyValueDatabaseSnapshot LevelDBDatabase::createSnapshot() {
+	const leveldb::Snapshot *sht = db->GetSnapshot();
+	try {
+		return new LevelDBSnapshot(this, sht);
+	} catch (...) {
+		db->ReleaseSnapshot(sht);
+		throw;
+	}
+}
+
+LevelDBSnapshot::LevelDBSnapshot(RefCntPtr<LevelDBDatabase> db, const leveldb::Snapshot *snapshot)
+	:db(db),snapshot(snapshot)
+{
+
+}
+
+LevelDBSnapshot::~LevelDBSnapshot() {
+	db->getDBObject()->ReleaseSnapshot(snapshot);
+}
+
+PIterator LevelDBSnapshot::findRange(const std::string_view& prefix,bool reverse) {
+		leveldb::ReadOptions opt;
+		opt.fill_cache = false;
+		opt.snapshot = snapshot;
+		return new LevelDBIteratorPrefix(std::string(prefix), db->getDBObject()->NewIterator(opt), reverse);
+}
+
+PIterator LevelDBSnapshot::findRange(const std::string_view& start,const std::string_view& end) {
+	leveldb::ReadOptions opt;
+	opt.fill_cache = false;
+	opt.snapshot = snapshot;
+	return new LevelDBIteratorRange(start, end, db->getDBObject()->NewIterator(opt));
+}
+
+bool LevelDBSnapshot::lookup(const std::string_view& key,std::string& value) {
+	leveldb::ReadOptions opt;
+	opt.fill_cache = false;
+	opt.snapshot = snapshot;
+	leveldb::Status s = db->getDBObject()->Get(opt, str2slice(key),&value);
+	if (s.ok()) return true;
+	if (s.IsNotFound()) return false;
+	throw LevelDBException(s);
+}
+
+bool LevelDBSnapshot::exists(const std::string_view& key) {
+	std::string tmp;
+	return lookup(key,tmp);
+}
+
+bool LevelDBSnapshot::existsPrefix(const std::string_view& key) {
+	leveldb::ReadOptions opt;
+	opt.fill_cache = false;
+	opt.snapshot = snapshot;
+	std::unique_ptr<leveldb::Iterator> iter(db->getDBObject()->NewIterator(opt));
+	iter->Seek(str2slice(key));
+	if (iter->Valid()) return slice2str(iter->key()).substr(0,key.length()) == key;
+	else return false;
 }
 
 }

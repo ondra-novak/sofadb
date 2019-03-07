@@ -66,7 +66,9 @@ public:
 	virtual bool existsPrefix(const std::string_view &key) ;
 	virtual void destroy();
 	virtual ~LevelDBDatabase();
+	virtual PKeyValueDatabaseSnapshot createSnapshot();
 	leveldb::DB *getDBObject() {return db;}
+
 
 	bool isDestroyed() const;
 
@@ -92,6 +94,22 @@ public:
 protected:
 	RefCntPtr<LevelDBDatabase> db;
 	leveldb::WriteBatch batch;
+
+};
+
+class LevelDBSnapshot: public AbstractKeyValueDatabaseSnapshot {
+public:
+	LevelDBSnapshot(RefCntPtr<LevelDBDatabase> db, const leveldb::Snapshot *snapshot);
+	virtual ~LevelDBSnapshot();
+
+	virtual PIterator findRange(const std::string_view &prefix, bool reverse = false);
+	virtual PIterator findRange(const std::string_view &start, const std::string_view &end);
+	virtual bool lookup(const std::string_view &key, std::string &value) ;
+	virtual bool exists(const std::string_view &key);
+	virtual bool existsPrefix(const std::string_view &key);
+protected:
+	RefCntPtr<LevelDBDatabase> db;
+	const leveldb::Snapshot *snapshot;
 
 };
 

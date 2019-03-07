@@ -147,5 +147,35 @@ bool MemDBIterator<iterator>::getNext(KeyValue& row) {
 	return true;
 }
 
+PKeyValueDatabaseSnapshot MemDB::createSnapshot() {
+	return new MemDBSnapshot(this);
+}
+
+MemDBSnapshot::MemDBSnapshot(RefCntPtr<MemDB> owner)
+	:owner(owner),lock(owner->lock)
+{
+
+}
+
+PIterator MemDBSnapshot::findRange(const std::string_view& prefix, bool reverse) {
+	return owner->findRange(prefix,reverse);
+}
+
+PIterator MemDBSnapshot::findRange(const std::string_view& start, const std::string_view& end) {
+	return owner->findRange(start,end);
+}
+
+bool MemDBSnapshot::lookup(const std::string_view& key, std::string& value) {
+	return owner->lookup(key,value);
+}
+
+bool MemDBSnapshot::exists(const std::string_view& key) {
+	return owner->exists(key);
+}
+
+bool MemDBSnapshot::existsPrefix(const std::string_view& key) {
+	return owner->existsPrefix(key);
+}
+
 
 }

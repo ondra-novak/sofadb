@@ -72,14 +72,16 @@ namespace sofadb {
 
 	};
 
+	class AbstractKeyValueDatabaseSnapshot;
+	class AbstractKeyValueDatabase;
+
 	using PChangeset = RefCntPtr<AbstractChangeset>;
+	using PKeyValueDatabase = RefCntPtr<AbstractKeyValueDatabase>;
+	using PKeyValueDatabaseSnapshot = RefCntPtr<AbstractKeyValueDatabaseSnapshot>;
 
 
-	class AbstractKeyValueDatabase:public RefCntObj{
+	class AbstractKeyValueDatabaseSnapshot: public RefCntObj {
 	public:
-
-		virtual PChangeset createChangeset() = 0;
-
 		virtual PIterator findRange(const std::string_view &prefix, bool reverse = false) = 0;
 
 		virtual PIterator findRange(const std::string_view &start, const std::string_view &end) = 0;
@@ -91,16 +93,26 @@ namespace sofadb {
 
 		virtual bool existsPrefix(const std::string_view &key) = 0;
 
+		virtual ~AbstractKeyValueDatabaseSnapshot() {};
+	};
+
+	class AbstractKeyValueDatabase:public AbstractKeyValueDatabaseSnapshot {
+	public:
+
+		virtual PChangeset createChangeset() = 0;
+
+
 		///Destroy pernament storage
 		/** function doesn't destroy anything until the object is destroyed */
 		virtual void destroy() = 0;
+
+		virtual PKeyValueDatabaseSnapshot createSnapshot() = 0;
 
 		virtual ~AbstractKeyValueDatabase() {};
 
 
 	};
 
-	using PKeyValueDatabase = RefCntPtr<AbstractKeyValueDatabase>;
 
 	class AbstractKeyValueFactory: public RefCntObj {
 	public:

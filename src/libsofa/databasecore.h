@@ -17,6 +17,7 @@
 #include "kvapi.h"
 #include <mutex>
 #include <functional>
+#include <unordered_set>
 
 
 namespace sofadb {
@@ -99,6 +100,16 @@ public:
 		SeqNum seqnum;
 	};
 
+	struct ViewResult {
+		std::string_view docId;
+		std::string_view key;
+		std::string_view value;
+	};
+
+	using AlterKeyObserver = std::function<void(const std::string_view &)>;
+
+
+
 private:
 	struct WriteState {
 		PChangeset curBatch;
@@ -152,7 +163,7 @@ private:
 		PInfo(const PInfo &other):ptr(other.ptr) {if (ptr) ptr->lock.lock();}
 		PInfo(PInfo &&other):ptr(other.ptr) {other.ptr = nullptr;}
 		~PInfo() {if (ptr) ptr->lock.unlock();}
-		Info *operator->() {return ptr;}
+		Info *operator->() const {return ptr;}
 		bool operator==(nullptr_t) const {return ptr == nullptr;}
 		bool operator!=(nullptr_t) const {return ptr != nullptr;}
 		PInfo &operator=(const PInfo &other) {if (ptr) ptr->lock.unlock(); ptr = other.ptr;if (ptr) ptr->lock.lock();return *this;}
@@ -444,7 +455,74 @@ public:
 	bool view_waitForUpdate(Handle h, ViewID viewId, Callback callback);
 
 
-	bool view_finishUpdate();
+	bool view_finishUpdate(Handle h, ViewID viewId);
+
+	///Updates view with new data
+	/**
+	 * @param h handle to database
+	 * @param viewId handle of view
+	 * @param seqNum sequence number. Update will be accepted only if seqNum is above last seqNum of the view
+	 * @param docId document ID
+	 * @param keyvaluedata contains array of key-values data. There are two strings for each update, where
+	 * first of the strings is key and second is value. Note that key should not contain double zero
+	 * characters otherwise it can be detected as field separator
+	 * @param altered_keys keys that has been affected by this update (including that in keyvaluedata)
+	 *
+	 * @retval true update stored
+	 * @retval false update failed - probably invalid h, invalid viewid or invalid seqNum
+	 */
+	bool view_updateDoc(Handle h, ViewID viewId, SeqNum seqNum,
+			const std::string_view &docId,
+			const std::basic_string_view<std::pair<std::string,std::string> > &keyvaluedata,
+			AlterKeyObserver &&altered_keys);
+
+	///Retrieves keys for single document of specified view
+	/**
+	 * @param h handle to database
+	 * @param viewId handle of view
+	 * @param docId document id
+	 * @param callback function called for each result - it can return false to stop enumeration
+	 * @return function returns sequence number of the view or 0 if error (because valid view cannot have seqnum 0)
+	 */
+	SeqNum view_getDocKeys(Handle h, ViewID viewId, std::string_view &docId, std::function<bool(const ViewResult &)> &&callback);
+
+	///Retrieves list keys starting by given prefix
+	/**
+	 * @param h handle to database
+	 * @param viewId handle to view
+	 * @param prefix key prefix
+	 * @param reversed set true to return in reversed order
+	 * @param callback function called for every result
+	 * @return function returns sequence number of the view or 0 of error
+	 */
+	SeqNum view_list(Handle h, ViewID viewId, std::string_view &prefix, bool reversed, std::function<bool(const ViewResult &)> &&callback);
+
+	///Retrieve list of keys from given range
+	SeqNum view_list(Handle h, ViewID viewId, std::string_view &start_key, std::string_view &end_key, std::function<bool(const ViewResult &)> &&callback);
+
+	///Erase document from the view, returns modified keys
+	/** this is for correct funtion of purge*/
+
+	bool view_eraseDoc(Handle h, ViewID viewId, std::string_view &doc_id,
+			AlterKeyObserver &&altered_keys);
+
+	///Retrieves view's current sequence number
+	SeqNum view_getSeqNum(Handle h, ViewID viewId);
+
+	using ViewEmitFn = std::function<void(std::string_view, std::string_view)>;
+	using ViewUpdateFn = std::function<void(const RawDocument &doc, const ViewEmitFn &)>;
+
+	///Updates view
+	/**
+	 * @param h handle to database
+	 * @param viewId handle to view
+	 * @param limit maximum count of documents process in one call
+	 * @param mapFn function called for every document to generate keys (to map document to keys)
+	 * @param observer function that collects all altered keys
+	 * @retval true update processed
+	 * @retval false update not need or view doesn't exists
+	 */
+	bool view_update(Handle h, ViewID viewId, std::size_t limit, ViewUpdateFn &&mapFn, AlterKeyObserver &&observer);
 
 protected:
 
@@ -461,8 +539,8 @@ protected:
 
 	void flushWriteState(WriteState &st);
 	PInfo getDatabaseState(Handle h);
-	PChangeset beginBatch(PInfo &nfo);
-	void endBatch(PInfo &nfo);
+	PChangeset beginBatch(const PInfo &nfo);
+	void endBatch(const PInfo &nfo);
 	void value2document(const std::string_view &value, RawDocument &doc);
 	void document2value(std::string& value, const RawDocument& doc, SeqNum seqid);
 
@@ -488,6 +566,9 @@ protected:
 	PKeyValueDatabase selectDB(Storage storage) const;
 
 	void loadDB(Iterator &iter);
+
+	void view_eraseDoc2(Handle h, ViewID viewId, const PInfo &nfo,
+			const std::string_view& doc_id, AlterKeyObserver&& altered_keys);
 
 
 };
